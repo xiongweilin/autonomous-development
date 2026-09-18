@@ -12,13 +12,13 @@ from autonomous_development.domain.enums import (
 )
 from autonomous_development.domain.models import (
     DevelopmentCycle,
-    Experiment,
     ReleaseDecision,
     VerificationRun,
 )
-from autonomous_development.domain.transitions import (
-    StaleCycleError,
-    decide_promotion,
+from autonomous_development.domain.transitions import StaleCycleError, decide_promotion
+from autonomous_development.ports.persistence import (
+    OperationConflictError,
+    ReleaseDecisionRepository,
 )
 
 
@@ -33,9 +33,11 @@ class ReleaseService:
         self,
         cycles: CycleService,
         experiments: ExperimentService,
+        decisions: ReleaseDecisionRepository,
     ) -> None:
         self._cycles = cycles
         self._experiments = experiments
+        self._decisions = decisions
 
     def apply_canary_decision(
         self,
@@ -83,78 +85,24 @@ class ReleaseService:
         expected_version: int,
         operation_id: str,
     ) -> ReleaseApplicationResult:
+        if not operation_id.strip():
+            raise ValueError("operation_id must be non-empty")
+
         cycle = self._cycles.get(cycle_id)
         if cycle.experiment_id is None:
             raise ValueError("promotion-ready cycle has no experiment")
-
         experiment = self._experiments.get(cycle.experiment_id)
         history = self._experiments.promotion_history(experiment.id)
 
-        if cycle.version != expected_version:
-            return self._replay_promotion(
+        decision_cycle = (
+            cycle
+            if cycle.version == expected_version
+            else replace(
                 cycle,
-                verification,
-                experiment=experiment,
-                history=history,
-                mandatory_gates=mandatory_gates,
-                expected_version=expected_version,
-                operation_id=operation_id,
+                state=CycleState.PROMOTION_READY,
+                version=expected_version,
+                release_decision=None,
             )
-
-        decision = decide_promotion(
-            cycle,
-            verification,
-            experiment,
-            history,
-            mandatory_gates=mandatory_gates,
-        )
-        target_state = _decision_state(decision.kind)
-        if target_state is None:
-            return ReleaseApplicationResult(decision=decision, cycle=cycle)
-
-        updated = self._cycles.transition(
-            cycle_id,
-            target_state,
-            expected_version=expected_version,
-            operation_id=f"{operation_id}:{decision.kind.value}",
-            release_decision=decision.kind,
-        )
-        return ReleaseApplicationResult(decision=decision, cycle=updated)
-
-    def _replay_promotion(
-        self,
-        cycle: DevelopmentCycle,
-        verification: VerificationRun,
-        *,
-        experiment: Experiment,
-        history: tuple[CanaryStageDecision, ...],
-        mandatory_gates: frozenset[str],
-        expected_version: int,
-        operation_id: str,
-    ) -> ReleaseApplicationResult:
-        applied_kind = cycle.release_decision
-        if applied_kind is None:
-            raise StaleCycleError(
-                f"cycle {cycle.id} advanced without a replayable release decision"
-            )
-        target_state = _decision_state(applied_kind)
-        if target_state is None:
-            raise StaleCycleError(
-                f"cycle {cycle.id} advanced without a replayable release decision"
-            )
-
-        replayed = self._cycles.transition(
-            cycle.id,
-            target_state,
-            expected_version=expected_version,
-            operation_id=f"{operation_id}:{applied_kind.value}",
-            release_decision=applied_kind,
-        )
-        decision_cycle = replace(
-            cycle,
-            state=CycleState.PROMOTION_READY,
-            version=expected_version,
-            release_decision=None,
         )
         recomputed = decide_promotion(
             decision_cycle,
@@ -163,11 +111,30 @@ class ReleaseService:
             history,
             mandatory_gates=mandatory_gates,
         )
-        if recomputed.kind is not applied_kind:
-            raise ValueError(
-                "release operation replay produced a different decision from persisted state"
-            )
-        return ReleaseApplicationResult(decision=recomputed, cycle=replayed)
+
+        existing = self._decisions.get(operation_id)
+        if existing is not None:
+            if existing.decision != recomputed:
+                raise OperationConflictError(
+                    f"operation id {operation_id} was replayed with a different release decision"
+                )
+            decision = existing.decision
+        else:
+            _require_version(cycle, expected_version)
+            decision = self._decisions.record(operation_id, recomputed).decision
+
+        target_state = _decision_state(decision.kind)
+        if target_state is None:
+            return ReleaseApplicationResult(decision=decision, cycle=cycle)
+
+        updated = self._cycles.transition(
+            cycle_id,
+            target_state,
+            expected_version=expected_version,
+            operation_id=f"{operation_id}:effect:{decision.kind.value}",
+            release_decision=decision.kind,
+        )
+        return ReleaseApplicationResult(decision=decision, cycle=updated)
 
 
 def _decision_state(kind: ReleaseDecisionKind) -> CycleState | None:
