@@ -20,7 +20,7 @@ class RuntimeSettings(BaseSettings):
 
     api_host: str = "127.0.0.1"
     api_port: int = Field(default=8765, ge=1, le=65535)
-    canary_proxy_base_url: str = "http://127.0.0.1:8766"
+    canary_proxy_base_url: str = "http://127.0.0.1:8765/product"
     prometheus_base_url: str = "http://127.0.0.1:19090"
     telemetry_queries: dict[str, str] = Field(default_factory=dict)
 
@@ -32,6 +32,7 @@ class RuntimeSettings(BaseSettings):
     minimum_diagnosis_confidence: float = Field(default=0.65, ge=0.0, le=1.0)
     canary_hold_sleep_seconds: float = Field(default=30.0, gt=0)
     soak_hold_sleep_seconds: float = Field(default=30.0, gt=0)
+    canary_observation_timeout_seconds: int = Field(default=900, ge=1)
 
     @field_validator("state_root", mode="before")
     @classmethod
@@ -44,8 +45,8 @@ class RuntimeSettings(BaseSettings):
     @field_validator("api_host")
     @classmethod
     def validate_api_host(cls, value: str) -> str:
-        if value not in {"127.0.0.1", "localhost", "::1"}:
-            raise ValueError("V1 control API must bind to loopback")
+        if value != "127.0.0.1":
+            raise ValueError("V1 control API must bind to 127.0.0.1")
         return value
 
     @field_validator("canary_proxy_base_url", "prometheus_base_url")
