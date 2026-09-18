@@ -5,6 +5,9 @@ from sqlalchemy import create_engine
 
 from autonomous_development.adapters.postgres.cycles import SqlCycleRepository
 from autonomous_development.adapters.postgres.experiments import SqlExperimentRepository
+from autonomous_development.adapters.postgres.release_decisions import (
+    SqlReleaseDecisionRepository,
+)
 from autonomous_development.adapters.postgres.schema import metadata
 from autonomous_development.application.cycles import CycleService
 from autonomous_development.application.experiments import ExperimentService
@@ -30,7 +33,8 @@ def services() -> tuple[CycleService, ExperimentService, ReleaseService]:
     metadata.create_all(engine)
     cycles = CycleService(SqlCycleRepository(engine))
     experiments = ExperimentService(SqlExperimentRepository(engine))
-    return cycles, experiments, ReleaseService(cycles, experiments)
+    decisions = SqlReleaseDecisionRepository(engine)
+    return cycles, experiments, ReleaseService(cycles, experiments, decisions)
 
 
 def cycle(state: CycleState = CycleState.CANARYING, version: int = 9) -> DevelopmentCycle:
@@ -325,3 +329,33 @@ def test_rollback_operation_replays_after_terminal_transition() -> None:
     )
     assert first == second
     assert second.state is CycleState.ROLLED_BACK
+
+
+
+def test_release_operation_conflicts_if_recomputed_decision_changes() -> None:
+    cycles, experiments, releases = services()
+    final = seed_complete_canary(cycles, experiments)
+    releases.apply_canary_decision(
+        "cycle-1",
+        final,
+        expected_version=9,
+        operation_id="release-conflict",
+    )
+    releases.decide_and_apply_promotion(
+        "cycle-1",
+        verification(),
+        mandatory_gates=frozenset({"static", "tests"}),
+        expected_version=10,
+        operation_id="release-conflict",
+    )
+
+    from autonomous_development.ports.persistence import OperationConflictError
+
+    with pytest.raises(OperationConflictError):
+        releases.decide_and_apply_promotion(
+            "cycle-1",
+            verification(),
+            mandatory_gates=frozenset({"static", "tests", "security"}),
+            expected_version=10,
+            operation_id="release-conflict",
+        )
