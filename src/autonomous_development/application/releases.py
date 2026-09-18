@@ -12,6 +12,7 @@ from autonomous_development.domain.enums import (
 )
 from autonomous_development.domain.models import (
     DevelopmentCycle,
+    Experiment,
     ReleaseDecision,
     VerificationRun,
 )
@@ -125,7 +126,7 @@ class ReleaseService:
         cycle: DevelopmentCycle,
         verification: VerificationRun,
         *,
-        experiment,
+        experiment: Experiment,
         history: tuple[CanaryStageDecision, ...],
         mandatory_gates: frozenset[str],
         expected_version: int,
@@ -133,8 +134,9 @@ class ReleaseService:
     ) -> ReleaseApplicationResult:
         applied_kind = cycle.release_decision
         if applied_kind is None:
-            _require_version(cycle, expected_version)
-            raise AssertionError("unreachable")
+            raise StaleCycleError(
+                f"cycle {cycle.id} advanced without a replayable release decision"
+            )
         target_state = _decision_state(applied_kind)
         if target_state is None:
             raise StaleCycleError(
