@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from autonomous_development.adapters.evidence import LocalEvidenceStore
 from autonomous_development.adapters.quality import K6PerformanceGate
 from autonomous_development.domain.enums import VerificationStatus
@@ -84,3 +86,15 @@ def test_k6_gate_blocks_vacuous_script_without_thresholds(tmp_path: Path) -> Non
 def test_k6_threshold_failure_is_failed_not_blocked(tmp_path: Path) -> None:
     check = _gate(tmp_path, FakeK6Runner(returncode=99)).evaluate(candidate(tmp_path))
     assert check.status is VerificationStatus.FAILED
+
+
+def test_k6_gate_rejects_non_loopback_target(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="loopback"):
+        K6PerformanceGate(
+            runner=FakeK6Runner(),
+            evidence=LocalEvidenceStore((tmp_path / "evidence").resolve()),
+            base_url="https://example.com",
+            script_path="tests/performance/smoke.js",
+            required_threshold_metrics=("http_req_failed",),
+            timeout_seconds=30,
+        )
