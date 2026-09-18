@@ -8,12 +8,15 @@ from typing import Protocol
 @dataclass(frozen=True, slots=True)
 class BuildRequest:
     candidate_id: str
+    source_tree_hash: str
     context_dir: Path
     dockerfile: Path
 
     def __post_init__(self) -> None:
         if not self.candidate_id.strip():
             raise ValueError("candidate_id must be non-empty")
+        if not self.source_tree_hash.strip():
+            raise ValueError("source_tree_hash must be non-empty")
         if not self.context_dir.is_absolute() or not self.dockerfile.is_absolute():
             raise ValueError("build paths must be absolute")
         if not self.dockerfile.is_relative_to(self.context_dir):
