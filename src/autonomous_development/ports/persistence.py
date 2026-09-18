@@ -8,9 +8,10 @@ from autonomous_development.domain.canary import CanaryStageDecision
 from autonomous_development.domain.enums import CanaryDecisionKind, CycleState
 from autonomous_development.domain.models import (
     DevelopmentCycle,
+    EvidenceWindow,
     Experiment,
-    ReleasedVersion,
     ReleaseDecision,
+    ReleasedVersion,
     UserFeedback,
 )
 
@@ -144,3 +145,10 @@ class FeedbackRepository(Protocol):
         opened_at: datetime,
         closed_at: datetime,
     ) -> tuple[UserFeedback, ...]: ...
+
+
+
+class EvidenceWindowRepository(Protocol):
+    def add(self, window: EvidenceWindow) -> EvidenceWindow: ...
+
+    def get(self, window_id: str) -> EvidenceWindow | None: ...

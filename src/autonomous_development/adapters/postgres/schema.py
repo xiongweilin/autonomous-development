@@ -124,3 +124,19 @@ user_feedback = Table(
     Column("request_ref", String(256)),
     Column("free_text", String(4000)),
 )
+
+
+evidence_windows = Table(
+    "evidence_windows",
+    metadata,
+    Column("id", String(128), primary_key=True),
+    Column("target_id", String(128), nullable=False, index=True),
+    Column("release_ids_json", JSON, nullable=False),
+    Column("opened_at", DateTime(timezone=True), nullable=False),
+    Column("closed_at", DateTime(timezone=True), nullable=False),
+    Column("telemetry_refs_json", JSON, nullable=False),
+    Column("feedback_refs_json", JSON, nullable=False),
+    Column("regression_refs_json", JSON, nullable=False),
+    Column("incident_refs_json", JSON, nullable=False),
+    Column("missing_evidence_json", JSON, nullable=False),
+)
