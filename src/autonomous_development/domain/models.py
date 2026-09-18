@@ -162,6 +162,7 @@ class ChangeProposal:
     forbidden_paths: tuple[str, ...]
     max_implementation_attempts: int
     mandatory_gates: tuple[str, ...]
+    change_intent: str | None = None
 
     def __post_init__(self) -> None:
         for field_name, value in (
@@ -176,6 +177,12 @@ class ChangeProposal:
             raise ValueError("proposal requires acceptance criteria, scope and mandatory gates")
         if self.max_implementation_attempts < 1:
             raise ValueError("implementation attempt budget must be positive")
+        if self.diagnosis_id is not None and (
+            self.change_intent is None or not self.change_intent.strip()
+        ):
+            raise ValueError("diagnosis-backed proposal requires a change intent")
+        if self.change_intent is not None and len(self.change_intent) > 4000:
+            raise ValueError("change intent exceeds V1 limit")
 
 
 @dataclass(frozen=True, slots=True)
@@ -364,6 +371,14 @@ class UserFeedback:
         _required(self.provenance, "feedback provenance")
         if not 0 <= self.severity <= 5:
             raise ValueError("feedback severity must be between 0 and 5")
+        if len(self.category) > 128:
+            raise ValueError("feedback category exceeds V1 limit")
+        if len(self.provenance) > 256:
+            raise ValueError("feedback provenance exceeds V1 limit")
+        if self.request_ref is not None and len(self.request_ref) > 256:
+            raise ValueError("feedback request reference exceeds V1 limit")
+        if self.free_text is not None and len(self.free_text) > 4000:
+            raise ValueError("feedback free text exceeds V1 limit")
 
     @property
     def attributable(self) -> bool:
@@ -391,6 +406,9 @@ class DevelopmentCycle:
     baseline_release_id: str
     state: CycleState = CycleState.NEW
     version: int = 0
+    evidence_window_id: str | None = None
+    diagnosis_id: str | None = None
+    change_proposal_id: str | None = None
     candidate_id: str | None = None
     verification_run_id: str | None = None
     artifact_id: str | None = None

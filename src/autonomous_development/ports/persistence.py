@@ -1,11 +1,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol
 
 from autonomous_development.domain.canary import CanaryStageDecision
 from autonomous_development.domain.enums import CanaryDecisionKind, CycleState
-from autonomous_development.domain.models import DevelopmentCycle, Experiment, ReleaseDecision
+from autonomous_development.domain.models import (
+    ChangeProposal,
+    DevelopmentCycle,
+    Diagnosis,
+    EvidenceWindow,
+    Experiment,
+    ReleaseDecision,
+    ReleasedVersion,
+    UserFeedback,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +43,14 @@ class ExperimentStageReceipt:
 class ReleaseDecisionReceipt:
     operation_id: str
     decision: ReleaseDecision
+
+
+@dataclass(frozen=True, slots=True)
+class ServingReleaseReceipt:
+    operation_id: str
+    target_id: str
+    release_id: str
+    previous_release_id: str | None
 
 
 class ConcurrentCycleError(RuntimeError):
@@ -97,3 +115,55 @@ class ReleaseDecisionRepository(Protocol):
         operation_id: str,
         decision: ReleaseDecision,
     ) -> ReleaseDecisionReceipt: ...
+
+
+
+class ReleasedVersionRepository(Protocol):
+    def add(self, release: ReleasedVersion) -> ReleasedVersion: ...
+
+    def get(self, release_id: str) -> ReleasedVersion | None: ...
+
+    def get_serving(self, target_id: str) -> ReleasedVersion | None: ...
+
+    def set_serving(
+        self,
+        target_id: str,
+        release_id: str,
+        *,
+        operation_id: str,
+    ) -> ServingReleaseReceipt: ...
+
+
+class FeedbackRepository(Protocol):
+    def add(self, feedback: UserFeedback) -> UserFeedback: ...
+
+    def get(self, feedback_id: str) -> UserFeedback | None: ...
+
+    def list_attributable(
+        self,
+        target_id: str,
+        release_id: str,
+        *,
+        opened_at: datetime,
+        closed_at: datetime,
+    ) -> tuple[UserFeedback, ...]: ...
+
+
+
+class EvidenceWindowRepository(Protocol):
+    def add(self, window: EvidenceWindow) -> EvidenceWindow: ...
+
+    def get(self, window_id: str) -> EvidenceWindow | None: ...
+
+
+
+class DiagnosisRepository(Protocol):
+    def add(self, diagnosis: Diagnosis) -> Diagnosis: ...
+
+    def get(self, diagnosis_id: str) -> Diagnosis | None: ...
+
+
+class ChangeProposalRepository(Protocol):
+    def add(self, proposal: ChangeProposal) -> ChangeProposal: ...
+
+    def get(self, proposal_id: str) -> ChangeProposal | None: ...
