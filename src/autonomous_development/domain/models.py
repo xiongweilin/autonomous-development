@@ -292,9 +292,11 @@ class Deployment:
             ("environment", self.environment),
         ):
             _required(value, field_name)
-        if self.state in {DeploymentState.READY, DeploymentState.SERVING}:
-            if self.observed_at is None or not self.observation_refs:
-                raise ValueError("ready/serving deployment requires independent observation")
+        if (
+            self.state in {DeploymentState.READY, DeploymentState.SERVING}
+            and (self.observed_at is None or not self.observation_refs)
+        ):
+            raise ValueError("ready/serving deployment requires independent observation")
 
 
 @dataclass(frozen=True, slots=True)
