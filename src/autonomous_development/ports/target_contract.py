@@ -149,7 +149,7 @@ class TargetContract:
 
     @property
     def mandatory_gates(self) -> tuple[str, ...]:
-        return tuple(gate.id for gate in self.verification.gates) + ("performance",)
+        return (*(gate.id for gate in self.verification.gates), "performance")
 
 
 class TargetContractLoader(Protocol):
