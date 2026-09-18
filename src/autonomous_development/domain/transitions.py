@@ -26,31 +26,77 @@ TERMINAL_STATES = frozenset(
 )
 
 _ALLOWED: dict[CycleState, frozenset[CycleState]] = {
-    CycleState.NEW: frozenset({CycleState.BASELINE_VERIFIED, CycleState.BLOCKED, CycleState.CANCELLED}),
-    CycleState.BASELINE_VERIFIED: frozenset(
-        {CycleState.EVIDENCE_READY, CycleState.CHANGE_PROPOSED, CycleState.BLOCKED, CycleState.CANCELLED}
+    CycleState.NEW: frozenset(
+        {CycleState.BASELINE_VERIFIED, CycleState.BLOCKED, CycleState.CANCELLED}
     ),
-    CycleState.EVIDENCE_READY: frozenset({CycleState.DIAGNOSED, CycleState.BLOCKED, CycleState.CANCELLED}),
-    CycleState.DIAGNOSED: frozenset({CycleState.CHANGE_PROPOSED, CycleState.BLOCKED, CycleState.CANCELLED}),
-    CycleState.CHANGE_PROPOSED: frozenset({CycleState.DEVELOPING, CycleState.BLOCKED, CycleState.CANCELLED}),
+    CycleState.BASELINE_VERIFIED: frozenset(
+        {
+            CycleState.EVIDENCE_READY,
+            CycleState.CHANGE_PROPOSED,
+            CycleState.BLOCKED,
+            CycleState.CANCELLED,
+        }
+    ),
+    CycleState.EVIDENCE_READY: frozenset(
+        {CycleState.DIAGNOSED, CycleState.BLOCKED, CycleState.CANCELLED}
+    ),
+    CycleState.DIAGNOSED: frozenset(
+        {CycleState.CHANGE_PROPOSED, CycleState.BLOCKED, CycleState.CANCELLED}
+    ),
+    CycleState.CHANGE_PROPOSED: frozenset(
+        {CycleState.DEVELOPING, CycleState.BLOCKED, CycleState.CANCELLED}
+    ),
     CycleState.DEVELOPING: frozenset(
-        {CycleState.CANDIDATE_READY, CycleState.FAILED_RECOVERABLE, CycleState.BLOCKED, CycleState.CANCELLED}
+        {
+            CycleState.CANDIDATE_READY,
+            CycleState.FAILED_RECOVERABLE,
+            CycleState.BLOCKED,
+            CycleState.CANCELLED,
+        }
     ),
     CycleState.FAILED_RECOVERABLE: frozenset(
-        {CycleState.DEVELOPING, CycleState.FAILED_TERMINAL, CycleState.BLOCKED, CycleState.CANCELLED}
+        {
+            CycleState.DEVELOPING,
+            CycleState.FAILED_TERMINAL,
+            CycleState.BLOCKED,
+            CycleState.CANCELLED,
+        }
     ),
-    CycleState.CANDIDATE_READY: frozenset({CycleState.VERIFYING, CycleState.REJECTED, CycleState.CANCELLED}),
+    CycleState.CANDIDATE_READY: frozenset(
+        {CycleState.VERIFYING, CycleState.REJECTED, CycleState.CANCELLED}
+    ),
     CycleState.VERIFYING: frozenset(
-        {CycleState.VERIFIED, CycleState.REJECTED, CycleState.FAILED_RECOVERABLE, CycleState.CANCELLED}
+        {
+            CycleState.VERIFIED,
+            CycleState.REJECTED,
+            CycleState.FAILED_RECOVERABLE,
+            CycleState.CANCELLED,
+        }
     ),
-    CycleState.VERIFIED: frozenset({CycleState.BUILT, CycleState.REJECTED, CycleState.CANCELLED}),
-    CycleState.BUILT: frozenset({CycleState.STAGED, CycleState.REJECTED, CycleState.CANCELLED}),
-    CycleState.STAGED: frozenset({CycleState.CANARYING, CycleState.REJECTED, CycleState.CANCELLED}),
+    CycleState.VERIFIED: frozenset(
+        {CycleState.BUILT, CycleState.REJECTED, CycleState.CANCELLED}
+    ),
+    CycleState.BUILT: frozenset(
+        {CycleState.STAGED, CycleState.REJECTED, CycleState.CANCELLED}
+    ),
+    CycleState.STAGED: frozenset(
+        {CycleState.CANARYING, CycleState.REJECTED, CycleState.CANCELLED}
+    ),
     CycleState.CANARYING: frozenset(
-        {CycleState.PROMOTION_READY, CycleState.REJECTED, CycleState.ROLLED_BACK, CycleState.CANCELLED}
+        {
+            CycleState.PROMOTION_READY,
+            CycleState.REJECTED,
+            CycleState.ROLLED_BACK,
+            CycleState.CANCELLED,
+        }
     ),
     CycleState.PROMOTION_READY: frozenset(
-        {CycleState.PROMOTED, CycleState.REJECTED, CycleState.ROLLED_BACK, CycleState.CANCELLED}
+        {
+            CycleState.PROMOTED,
+            CycleState.REJECTED,
+            CycleState.ROLLED_BACK,
+            CycleState.CANCELLED,
+        }
     ),
     CycleState.PROMOTED: frozenset({CycleState.SOAKING, CycleState.ROLLED_BACK}),
     CycleState.SOAKING: frozenset({CycleState.COMPLETED, CycleState.ROLLED_BACK}),
@@ -161,9 +207,11 @@ def _validate_required_reference(
         CycleState.COMPLETED,
     } and experiment_id is None:
         raise TransitionError(f"{state.value} requires an experiment")
-    if state in {CycleState.PROMOTED, CycleState.SOAKING, CycleState.COMPLETED}:
-        if release_decision is not ReleaseDecisionKind.PROMOTE:
-            raise TransitionError(f"{state.value} requires an explicit promote decision")
+    if (
+        state in {CycleState.PROMOTED, CycleState.SOAKING, CycleState.COMPLETED}
+        and release_decision is not ReleaseDecisionKind.PROMOTE
+    ):
+        raise TransitionError(f"{state.value} requires an explicit promote decision")
 
 
 def decide_promotion(
