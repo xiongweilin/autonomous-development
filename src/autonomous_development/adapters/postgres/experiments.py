@@ -55,6 +55,22 @@ class SqlExperimentRepository(ExperimentRepository):
             )
         return _receipt_from_row(row) if row is not None else None
 
+    def list_stage_decisions(
+        self,
+        experiment_id: str,
+    ) -> tuple[ExperimentStageReceipt, ...]:
+        with self._engine.connect() as connection:
+            rows = (
+                connection.execute(
+                    select(experiment_stage_operations)
+                    .where(experiment_stage_operations.c.experiment_id == experiment_id)
+                    .order_by(experiment_stage_operations.c.sequence_id)
+                )
+                .mappings()
+                .all()
+            )
+        return tuple(_receipt_from_row(row) for row in rows)
+
     def commit_stage_decision(
         self,
         experiment: Experiment,
