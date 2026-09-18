@@ -16,6 +16,7 @@ from autonomous_development.domain.models import (
     ReleasedVersion,
     UserFeedback,
 )
+from autonomous_development.domain.soak import PostPromotionSoakDecision
 
 
 @dataclass(frozen=True, slots=True)
