@@ -236,3 +236,16 @@ product_objective_revisions = Table(
     Column("max_implementation_attempts", Integer, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
+
+
+feedback_iteration_triggers = Table(
+    "feedback_iteration_triggers",
+    metadata,
+    Column("feedback_id", String(128), primary_key=True),
+    Column("target_id", String(128), nullable=False, index=True),
+    Column("release_id", String(128), nullable=False, index=True),
+    Column("evidence_window_id", String(128), nullable=False),
+    Column("cycle_id", String(128), nullable=False, unique=True),
+    Column("proposal_id", String(128)),
+    Column("outcome", String(64), nullable=False),
+)

@@ -152,3 +152,46 @@ def test_window_cannot_cross_current_release_promotion() -> None:
             opened_at=now - timedelta(hours=1),
             closed_at=now,
         )
+
+
+
+def test_explicit_feedback_window_replays_without_recollecting_telemetry() -> None:
+    now = datetime.now(UTC)
+    releases = ReleaseCatalogService(Releases(release(now - timedelta(hours=2))))
+    feedback_item = feedback(now - timedelta(minutes=10))
+
+    class CountingTelemetry(Telemetry):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        def collect(self, **kwargs) -> TelemetryEvidence:
+            self.calls += 1
+            return super().collect(**kwargs)
+
+    telemetry = CountingTelemetry()
+    windows = Windows()
+    service = EvidenceWindowService(
+        releases,
+        Feedback((feedback_item,)),
+        telemetry,
+        windows,
+    )
+    first = service.close(
+        window_id="window-explicit",
+        target_id="target-1",
+        opened_at=now - timedelta(minutes=30),
+        closed_at=now,
+        feedback_ids=("feedback-1",),
+    )
+    second = service.close(
+        window_id="window-explicit",
+        target_id="target-1",
+        opened_at=now - timedelta(minutes=30),
+        closed_at=now,
+        feedback_ids=("feedback-1",),
+    )
+
+    assert second == first
+    assert first.feedback_refs == ("feedback:feedback-1",)
+    assert telemetry.calls == 1
