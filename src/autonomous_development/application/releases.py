@@ -52,6 +52,8 @@ class ReleaseService:
         if decision.kind in {CanaryDecisionKind.ADVANCE, CanaryDecisionKind.HOLD}:
             return cycle
 
+        self._experiments.require_recorded_decision(decision.experiment_id, decision)
+
         if decision.kind is CanaryDecisionKind.ROLLBACK:
             return self._cycles.transition(
                 cycle_id,
