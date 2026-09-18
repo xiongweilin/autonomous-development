@@ -28,8 +28,8 @@ from autonomous_development.domain.enums import (
 )
 from autonomous_development.domain.models import (
     BuildArtifact,
-    CandidateRevision,
     CanaryStage,
+    CandidateRevision,
     ChangeProposal,
     Deployment,
     DevelopmentCycle,
