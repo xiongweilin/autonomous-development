@@ -67,6 +67,11 @@ class ExperimentRepository(Protocol):
 
     def get_stage_decision(self, operation_id: str) -> ExperimentStageReceipt | None: ...
 
+    def list_stage_decisions(
+        self,
+        experiment_id: str,
+    ) -> tuple[ExperimentStageReceipt, ...]: ...
+
     def commit_stage_decision(
         self,
         experiment: Experiment,
