@@ -108,13 +108,13 @@ def bind_scheduled_feedback_workflow(workflow: FeedbackAutonomyWorkflow) -> None
 def scheduled_feedback_tick(
     scheduled_time: datetime,
     context: Any,
-) -> dict[str, object]:
+) -> None:
     workflow = _SCHEDULED_WORKFLOW
     if workflow is None:
         raise RuntimeError("scheduled feedback workflow has not been bound")
     if not isinstance(context, str) or not context.strip():
         raise ValueError("scheduled feedback context must be a target id")
-    return workflow.run(context, scheduled_time.isoformat())
+    workflow.run(context, scheduled_time.isoformat())
 
 
 def _result_document(result: FeedbackIterationResult) -> dict[str, object]:
