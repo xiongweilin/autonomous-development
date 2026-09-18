@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from .enums import CycleState, ReleaseDecisionKind, VerificationStatus
-from .models import DevelopmentCycle, ReleaseDecision, VerificationRun
+from .canary import CanaryStageDecision, promotion_evidence_refs
+from .enums import CanaryDecisionKind, CycleState, ReleaseDecisionKind, VerificationStatus
+from .models import DevelopmentCycle, Experiment, ReleaseDecision, VerificationRun
 
 
 class TransitionError(ValueError):
@@ -217,32 +218,41 @@ def _validate_required_reference(
 def decide_promotion(
     cycle: DevelopmentCycle,
     verification: VerificationRun,
+    experiment: Experiment,
+    canary_decisions: tuple[CanaryStageDecision, ...],
     *,
     mandatory_gates: frozenset[str],
-    canary_evidence_sufficient: bool,
-    hard_regression: bool,
-    evidence_refs: tuple[str, ...],
 ) -> ReleaseDecision:
     if cycle.state is not CycleState.PROMOTION_READY:
         raise TransitionError("promotion decision requires promotion-ready cycle")
     if verification.id != cycle.verification_run_id:
         raise TransitionError("verification run does not belong to this cycle")
-    if hard_regression:
+    if experiment.id != cycle.experiment_id:
+        raise TransitionError("experiment does not belong to this cycle")
+
+    try:
+        evidence_refs = promotion_evidence_refs(experiment, canary_decisions)
+    except ValueError as exc:
         return ReleaseDecision(
-            kind=ReleaseDecisionKind.ROLLBACK,
+            kind=ReleaseDecisionKind.BLOCKED,
+            cycle_id=cycle.id,
+            gate_refs=tuple(sorted(verification.passed_gates)),
+            evidence_refs=tuple(
+                ref for decision in canary_decisions for ref in decision.evidence_refs
+            ),
+            reason=f"canary history is not promotion-complete: {exc}",
+        )
+
+    final_decision = canary_decisions[-1]
+    if final_decision.kind is not CanaryDecisionKind.PROMOTION_READY:
+        return ReleaseDecision(
+            kind=ReleaseDecisionKind.BLOCKED,
             cycle_id=cycle.id,
             gate_refs=tuple(sorted(verification.passed_gates)),
             evidence_refs=evidence_refs,
-            reason="hard canary regression observed",
+            reason="final canary decision is not promotion-ready",
         )
-    if not canary_evidence_sufficient:
-        return ReleaseDecision(
-            kind=ReleaseDecisionKind.HOLD_INSUFFICIENT_EVIDENCE,
-            cycle_id=cycle.id,
-            gate_refs=tuple(sorted(verification.passed_gates)),
-            evidence_refs=evidence_refs,
-            reason="canary evidence is insufficient",
-        )
+
     failed_checks = tuple(
         check for check in verification.checks if check.status is not VerificationStatus.PASSED
     )
@@ -255,18 +265,11 @@ def decide_promotion(
             evidence_refs=evidence_refs,
             reason="mandatory verification gates are not all satisfied",
         )
-    if not evidence_refs:
-        return ReleaseDecision(
-            kind=ReleaseDecisionKind.BLOCKED,
-            cycle_id=cycle.id,
-            gate_refs=tuple(sorted(verification.passed_gates)),
-            evidence_refs=(),
-            reason="promotion cannot be reconstructed without canary evidence",
-        )
+
     return ReleaseDecision(
         kind=ReleaseDecisionKind.PROMOTE,
         cycle_id=cycle.id,
         gate_refs=tuple(sorted(verification.passed_gates)),
         evidence_refs=evidence_refs,
-        reason="all mandatory gates passed and canary evidence is sufficient",
+        reason="all mandatory gates passed and complete canary history is promotion-ready",
     )

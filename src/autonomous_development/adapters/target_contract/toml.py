@@ -4,8 +4,10 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from autonomous_development.domain.models import CanaryStage
 from autonomous_development.ports.target_contract import (
     TargetBuildContract,
+    TargetCanaryContract,
     TargetContract,
     TargetContractLoader,
     TargetDeploymentContract,
@@ -24,12 +26,13 @@ class TomlTargetContractLoader(TargetContractLoader):
         document = tomllib.loads((root / self._filename).read_text(encoding="utf-8"))
         _exact_keys(
             document,
-            {"schema_version", "target_id", "build", "deployment", "performance"},
+            {"schema_version", "target_id", "build", "deployment", "performance", "canary"},
             "target contract",
         )
         build = _table(document, "build")
         deployment = _table(document, "deployment")
         performance = _table(document, "performance")
+        canary = _table(document, "canary")
         _exact_keys(build, {"dockerfile", "dependency_locks"}, "build")
         _exact_keys(
             deployment,
@@ -40,6 +43,17 @@ class TomlTargetContractLoader(TargetContractLoader):
             performance,
             {"script_path", "required_threshold_metrics", "timeout_seconds"},
             "performance",
+        )
+        _exact_keys(
+            canary,
+            {
+                "stages",
+                "max_candidate_error_rate",
+                "max_error_rate_delta",
+                "max_candidate_p95_latency_ms",
+                "max_p95_latency_ratio",
+            },
+            "canary",
         )
         return TargetContract(
             schema_version=_int(document, "schema_version"),
@@ -61,6 +75,16 @@ class TomlTargetContractLoader(TargetContractLoader):
                     "required_threshold_metrics",
                 ),
                 timeout_seconds=_int(performance, "timeout_seconds"),
+            ),
+            canary=TargetCanaryContract(
+                stages=_stages(canary),
+                max_candidate_error_rate=_float(canary, "max_candidate_error_rate"),
+                max_error_rate_delta=_float(canary, "max_error_rate_delta"),
+                max_candidate_p95_latency_ms=_float(
+                    canary,
+                    "max_candidate_p95_latency_ms",
+                ),
+                max_p95_latency_ratio=_float(canary, "max_p95_latency_ratio"),
             ),
         )
 
@@ -94,6 +118,13 @@ def _int(document: dict[str, Any], key: str) -> int:
     return value
 
 
+def _float(document: dict[str, Any], key: str) -> float:
+    value = document.get(key)
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise ValueError(f"{key} must be numeric")
+    return float(value)
+
+
 def _string_tuple(document: dict[str, Any], key: str) -> tuple[str, ...]:
     value = document.get(key)
     if not isinstance(value, list) or not value or not all(
@@ -101,3 +132,27 @@ def _string_tuple(document: dict[str, Any], key: str) -> tuple[str, ...]:
     ):
         raise ValueError(f"{key} must be a non-empty string array")
     return tuple(value)
+
+
+def _stages(document: dict[str, Any]) -> tuple[CanaryStage, ...]:
+    raw = document.get("stages")
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("canary stages must be a non-empty table array")
+    stages: list[CanaryStage] = []
+    for index, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise ValueError(f"canary stage {index} must be a table")
+        normalized = {str(key): value for key, value in item.items()}
+        _exact_keys(
+            normalized,
+            {"weight_percent", "min_duration_seconds", "min_requests"},
+            f"canary stage {index}",
+        )
+        stages.append(
+            CanaryStage(
+                weight_percent=_int(normalized, "weight_percent"),
+                min_duration_seconds=_int(normalized, "min_duration_seconds"),
+                min_requests=_int(normalized, "min_requests"),
+            )
+        )
+    return tuple(stages)

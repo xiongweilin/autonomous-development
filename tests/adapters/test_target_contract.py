@@ -25,6 +25,27 @@ startup_timeout_seconds = 30
 script_path = "tests/performance/smoke.js"
 required_threshold_metrics = ["http_req_failed", "http_req_duration"]
 timeout_seconds = 120
+
+[canary]
+max_candidate_error_rate = 0.02
+max_error_rate_delta = 0.01
+max_candidate_p95_latency_ms = 250.0
+max_p95_latency_ratio = 1.25
+
+[[canary.stages]]
+weight_percent = 10
+min_duration_seconds = 60
+min_requests = 100
+
+[[canary.stages]]
+weight_percent = 50
+min_duration_seconds = 120
+min_requests = 200
+
+[[canary.stages]]
+weight_percent = 100
+min_duration_seconds = 180
+min_requests = 300
 """
         + extra,
         encoding="utf-8",
@@ -41,6 +62,8 @@ def test_loads_strict_target_contract(tmp_path: Path) -> None:
         "http_req_failed",
         "http_req_duration",
     )
+    assert tuple(stage.weight_percent for stage in contract.canary.stages) == (10, 50, 100)
+    assert contract.canary.max_p95_latency_ratio == 1.25
 
 
 def test_unknown_contract_key_is_rejected(tmp_path: Path) -> None:
@@ -58,4 +81,16 @@ def test_contract_rejects_path_traversal(tmp_path: Path) -> None:
     )
     path.write_text(content, encoding="utf-8")
     with pytest.raises(ValueError, match="relative path"):
+        TomlTargetContractLoader().load(str(tmp_path))
+
+
+def test_canary_contract_requires_final_100_percent_stage(tmp_path: Path) -> None:
+    _write_contract(tmp_path)
+    path = tmp_path / "autonomous-development.toml"
+    content = path.read_text(encoding="utf-8").replace(
+        "weight_percent = 100",
+        "weight_percent = 90",
+    )
+    path.write_text(content, encoding="utf-8")
+    with pytest.raises(ValueError, match="end at 100"):
         TomlTargetContractLoader().load(str(tmp_path))

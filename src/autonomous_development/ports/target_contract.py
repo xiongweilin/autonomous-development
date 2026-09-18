@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Protocol
 
+from autonomous_development.domain.models import CanaryStage
+
 
 def _relative_path(value: str, field_name: str) -> str:
     normalized = value.strip().replace("\\", "/")
@@ -77,12 +79,37 @@ class TargetPerformanceContract:
 
 
 @dataclass(frozen=True, slots=True)
+class TargetCanaryContract:
+    stages: tuple[CanaryStage, ...]
+    max_candidate_error_rate: float
+    max_error_rate_delta: float
+    max_candidate_p95_latency_ms: float
+    max_p95_latency_ratio: float
+
+    def __post_init__(self) -> None:
+        if not self.stages:
+            raise ValueError("canary contract requires stages")
+        weights = tuple(stage.weight_percent for stage in self.stages)
+        if weights != tuple(sorted(weights)) or weights[-1] != 100:
+            raise ValueError("canary stages must increase monotonically and end at 100")
+        if not 0.0 <= self.max_candidate_error_rate <= 1.0:
+            raise ValueError("max_candidate_error_rate must be between 0 and 1")
+        if not 0.0 <= self.max_error_rate_delta <= 1.0:
+            raise ValueError("max_error_rate_delta must be between 0 and 1")
+        if self.max_candidate_p95_latency_ms <= 0:
+            raise ValueError("max_candidate_p95_latency_ms must be positive")
+        if self.max_p95_latency_ratio < 1.0:
+            raise ValueError("max_p95_latency_ratio must be at least 1")
+
+
+@dataclass(frozen=True, slots=True)
 class TargetContract:
     schema_version: int
     target_id: str
     build: TargetBuildContract
     deployment: TargetDeploymentContract
     performance: TargetPerformanceContract
+    canary: TargetCanaryContract
 
     def __post_init__(self) -> None:
         if self.schema_version != 1:
