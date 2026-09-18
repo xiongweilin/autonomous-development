@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from uuid import uuid4
 
+import pytest
 from dbos import DBOS, DBOSConfig, SetWorkflowID
 from sqlalchemy import create_engine
 
@@ -11,6 +12,8 @@ from autonomous_development.application.cycles import CycleService
 from autonomous_development.domain.enums import CycleState
 from autonomous_development.domain.models import DevelopmentCycle
 from autonomous_development.workflows.development_cycle import DevelopmentCycleWorkflow
+
+pytestmark = pytest.mark.integration
 
 
 def test_postgres_cycle_and_dbos_idempotency() -> None:
