@@ -217,3 +217,10 @@ def _integer(value: object, field: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool):
         raise RuntimeError(f"persisted registry {field} is not an integer")
     return value
+
+
+
+def _integer(value: object, field: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise RuntimeError(f"persisted registry {field} is not an integer")
+    return value
