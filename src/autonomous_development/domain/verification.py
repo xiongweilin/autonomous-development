@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from autonomous_development.ports.command import CommandSpec
+from autonomous_development.domain.commands import CommandSpec
 
 
 REQUIRED_PREDEPLOY_GATES = frozenset({"static", "tests", "security"})
