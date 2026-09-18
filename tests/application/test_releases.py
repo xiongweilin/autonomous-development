@@ -263,3 +263,65 @@ def test_unrecorded_rollback_cannot_change_cycle() -> None:
     persisted = cycles.get("cycle-1")
     assert persisted.state is CycleState.CANARYING
     assert persisted.version == 9
+
+
+def test_promote_operation_replays_after_cycle_advanced() -> None:
+    cycles, experiments, releases = services()
+    final = seed_complete_canary(cycles, experiments)
+    releases.apply_canary_decision(
+        "cycle-1",
+        final,
+        expected_version=9,
+        operation_id="release-replay",
+    )
+    first = releases.decide_and_apply_promotion(
+        "cycle-1",
+        verification(),
+        mandatory_gates=frozenset({"static", "tests"}),
+        expected_version=10,
+        operation_id="release-replay",
+    )
+    second = releases.decide_and_apply_promotion(
+        "cycle-1",
+        verification(),
+        mandatory_gates=frozenset({"static", "tests"}),
+        expected_version=10,
+        operation_id="release-replay",
+    )
+    assert second.decision == first.decision
+    assert second.cycle == first.cycle
+
+
+def test_rollback_operation_replays_after_terminal_transition() -> None:
+    cycles, experiments, releases = services()
+    cycles.create(cycle())
+    experiments.create(experiment())
+    rollback = CanaryStageDecision(
+        kind=CanaryDecisionKind.ROLLBACK,
+        experiment_id="experiment-1",
+        stage_index=0,
+        next_stage_index=None,
+        evidence_refs=("canary:rollback-replay",),
+        violated_guardrails=("candidate_error_rate",),
+        reason="regression",
+    )
+    experiments.record_decision(
+        "experiment-1",
+        rollback,
+        expected_stage_index=0,
+        operation_id="experiment:rollback-replay",
+    )
+    first = releases.apply_canary_decision(
+        "cycle-1",
+        rollback,
+        expected_version=9,
+        operation_id="release-rollback-replay",
+    )
+    second = releases.apply_canary_decision(
+        "cycle-1",
+        rollback,
+        expected_version=9,
+        operation_id="release-rollback-replay",
+    )
+    assert first == second
+    assert second.state is CycleState.ROLLED_BACK
