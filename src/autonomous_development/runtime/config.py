@@ -34,6 +34,10 @@ class RuntimeSettings(BaseSettings):
     soak_hold_sleep_seconds: float = Field(default=30.0, gt=0)
     canary_observation_timeout_seconds: int = Field(default=900, ge=1)
 
+    @classmethod
+    def from_environment(cls) -> RuntimeSettings:
+        return cls()  # type: ignore[call-arg]
+
     @field_validator("state_root", mode="before")
     @classmethod
     def validate_state_root(cls, value: object) -> Path:
