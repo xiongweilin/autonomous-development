@@ -45,10 +45,17 @@ class ProxyCanaryObserver(CanaryObserver):
         stage: CanaryStage,
         route_state: TrafficRouteState,
     ) -> CanaryStageEvidence:
-        if route_state.experiment_id != experiment_id or route_state.stage_index != stage_index:
-            raise CanaryObservationError("traffic route identity does not match requested canary stage")
+        if (
+            route_state.experiment_id != experiment_id
+            or route_state.stage_index != stage_index
+        ):
+            raise CanaryObservationError(
+                "traffic route identity does not match requested canary stage"
+            )
         if route_state.candidate_weight_percent != stage.weight_percent:
-            raise CanaryObservationError("traffic route weight does not match requested canary stage")
+            raise CanaryObservationError(
+                "traffic route weight does not match requested canary stage"
+            )
 
         deadline = time.monotonic() + self._observation_timeout_seconds
         latest: dict[str, Any] | None = None
