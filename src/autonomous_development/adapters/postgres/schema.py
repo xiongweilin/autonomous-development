@@ -65,3 +65,15 @@ experiment_stage_operations = Table(
     Column("violated_guardrails_json", JSON, nullable=False),
     Column("reason", String(512), nullable=False),
 )
+
+
+release_decision_operations = Table(
+    "release_decision_operations",
+    metadata,
+    Column("operation_id", String(192), primary_key=True),
+    Column("cycle_id", String(128), nullable=False, index=True),
+    Column("decision_kind", String(64), nullable=False),
+    Column("gate_refs_json", JSON, nullable=False),
+    Column("evidence_refs_json", JSON, nullable=False),
+    Column("reason", String(512), nullable=False),
+)
