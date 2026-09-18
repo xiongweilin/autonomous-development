@@ -49,6 +49,7 @@ class BuildService:
         built = self._build_provider.build(
             BuildRequest(
                 candidate_id=candidate.id,
+                source_tree_hash=candidate.tree_hash,
                 context_dir=context,
                 dockerfile=resolved_dockerfile,
             )
