@@ -14,6 +14,7 @@ from autonomous_development.application.experiments import ExperimentService
 from autonomous_development.application.proposals import ProposalService
 from autonomous_development.application.release_finalization import ReleaseFinalizationService
 from autonomous_development.application.releases import ReleaseService
+from autonomous_development.application.source_promotion import SourcePromotionService
 from autonomous_development.application.verification import VerificationService
 from autonomous_development.domain.canary import CanaryGuardrails, CanaryStageDecision
 from autonomous_development.domain.enums import (
@@ -56,6 +57,7 @@ class AutonomousIterationWorkflow(DBOSConfiguredInstance):
         canary: CanaryService,
         releases: ReleaseService,
         finalization: ReleaseFinalizationService,
+        source_promotion: SourcePromotionService,
         contract: TargetContract,
         repository_root: Path,
         worktree_root: Path,
@@ -86,6 +88,7 @@ class AutonomousIterationWorkflow(DBOSConfiguredInstance):
         self._canary = canary
         self._releases = releases
         self._finalization = finalization
+        self._source_promotion = source_promotion
         self._contract = contract
         self._repository_root = repository_root
         self._worktree_root = worktree_root
@@ -215,6 +218,7 @@ class AutonomousIterationWorkflow(DBOSConfiguredInstance):
                 "promotion controller did not produce a promoted cycle",
             )
 
+        self._promote_source_step(candidate_doc)
         promoted_at = self._promotion_time_step()
         release_doc = self._finalize_release_step(
             cycle_id,
@@ -559,6 +563,18 @@ class AutonomousIterationWorkflow(DBOSConfiguredInstance):
             operation_id=f"{operation_id}:promotion",
         )
         return _cycle_to_document(result.cycle)
+
+    @DBOS.step(retries_allowed=False)
+    def _promote_source_step(
+        self,
+        candidate_doc: dict[str, object],
+    ) -> dict[str, object]:
+        candidate = self._source_promotion.promote(
+            _candidate_from_document(candidate_doc),
+            repository_root=self._repository_root,
+            default_branch=self._default_branch,
+        )
+        return _candidate_to_document(candidate)
 
     @DBOS.step(retries_allowed=False)
     def _promotion_time_step(self) -> str:

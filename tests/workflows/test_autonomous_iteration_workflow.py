@@ -254,6 +254,23 @@ class PassingCanaryObserver:
         )
 
 
+class FakeSourcePromotion:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def promote(
+        self,
+        candidate: CandidateRevision,
+        *,
+        repository_root: Path,
+        default_branch: str,
+    ) -> CandidateRevision:
+        self.calls += 1
+        assert repository_root.is_absolute()
+        assert default_branch == "main"
+        return candidate
+
+
 def contract() -> TargetContract:
     return TargetContract(
         schema_version=1,
@@ -324,6 +341,7 @@ def test_dbos_iteration_promotes_and_replay_does_not_repeat_effects(tmp_path: Pa
     )
     catalog = ReleaseCatalogService(SqlReleasedVersionRepository(engine))
     finalization = ReleaseFinalizationService(catalog)
+    source_promotion = FakeSourcePromotion()
 
     worktree = (tmp_path / "worktree").resolve()
     worktree.mkdir()
@@ -351,6 +369,7 @@ def test_dbos_iteration_promotes_and_replay_does_not_repeat_effects(tmp_path: Pa
         canary=canary,
         releases=releases,
         finalization=finalization,
+        source_promotion=source_promotion,  # type: ignore[arg-type]
         contract=contract(),
         repository_root=tmp_path.resolve(),
         worktree_root=(tmp_path / "worktrees").resolve(),
@@ -388,6 +407,7 @@ def test_dbos_iteration_promotes_and_replay_does_not_repeat_effects(tmp_path: Pa
         assert performance.gate.calls == 1
         assert traffic.applied == 1
         assert observer.calls == 1
+        assert source_promotion.calls == 1
     finally:
         DBOS.destroy(workflow_completion_timeout_sec=5)
         engine.dispose()
