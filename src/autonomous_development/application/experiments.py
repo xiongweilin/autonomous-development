@@ -40,6 +40,43 @@ class ExperimentService:
             raise RuntimeError("canary decision receipt is ahead of persisted experiment")
         return experiment, _decision_from_receipt(receipt)
 
+    def promotion_history(
+        self,
+        experiment_id: str,
+    ) -> tuple[CanaryStageDecision, ...]:
+        experiment = self.get(experiment_id)
+        receipts = self._repository.list_stage_decisions(experiment_id)
+        history: list[CanaryStageDecision] = []
+        expected_stage = 0
+        final_stage = len(experiment.stages) - 1
+
+        for receipt in receipts:
+            if receipt.stage_index < expected_stage:
+                continue
+            if receipt.stage_index > expected_stage:
+                raise RuntimeError("canary receipt history skipped an experiment stage")
+
+            decision = _decision_from_receipt(receipt)
+            if decision.kind is CanaryDecisionKind.HOLD:
+                continue
+            if decision.kind is CanaryDecisionKind.ROLLBACK:
+                raise ValueError("canary experiment contains a rollback decision")
+
+            expected_kind = (
+                CanaryDecisionKind.PROMOTION_READY
+                if expected_stage == final_stage
+                else CanaryDecisionKind.ADVANCE
+            )
+            if decision.kind is not expected_kind:
+                raise ValueError("canary experiment history is not promotion-complete")
+
+            history.append(decision)
+            if expected_stage == final_stage:
+                return tuple(history)
+            expected_stage += 1
+
+        raise ValueError("canary experiment history is incomplete")
+
     def record_decision(
         self,
         experiment_id: str,
