@@ -164,7 +164,7 @@ def test_readiness_reports_all_required_runtime_boundaries(
     def transport(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/-/ready":
             return httpx.Response(200)
-        if request.url.path == "/__autodev/metrics/0":
+        if request.url.path == "/product/__autodev/metrics/0":
             return httpx.Response(404)
         return httpx.Response(500)
 
