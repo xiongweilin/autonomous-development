@@ -73,7 +73,9 @@ class BuildService:
             source_tree_hash=candidate.tree_hash,
             build_definition_digest=_digest_file(resolved_dockerfile),
             dependency_lock_digest=_digest_lockset(context, resolved_locks),
+            build_evidence_ref=built.evidence_ref,
             sbom_digest=supply_chain.sbom_digest,
+            sbom_ref=supply_chain.sbom_ref,
             vulnerability_scan_ref=supply_chain.vulnerability_scan_ref,
         )
 
