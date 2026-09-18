@@ -5,7 +5,7 @@ from typing import Protocol
 
 from autonomous_development.domain.canary import CanaryStageDecision
 from autonomous_development.domain.enums import CanaryDecisionKind, CycleState
-from autonomous_development.domain.models import DevelopmentCycle, Experiment
+from autonomous_development.domain.models import DevelopmentCycle, Experiment, ReleaseDecision
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +27,12 @@ class ExperimentStageReceipt:
     evidence_refs: tuple[str, ...]
     violated_guardrails: tuple[str, ...]
     reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class ReleaseDecisionReceipt:
+    operation_id: str
+    decision: ReleaseDecision
 
 
 class ConcurrentCycleError(RuntimeError):
@@ -80,3 +86,14 @@ class ExperimentRepository(Protocol):
         expected_stage_index: int,
         operation_id: str,
     ) -> ExperimentStageReceipt: ...
+
+
+
+class ReleaseDecisionRepository(Protocol):
+    def get(self, operation_id: str) -> ReleaseDecisionReceipt | None: ...
+
+    def record(
+        self,
+        operation_id: str,
+        decision: ReleaseDecision,
+    ) -> ReleaseDecisionReceipt: ...
