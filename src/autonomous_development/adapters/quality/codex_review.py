@@ -15,6 +15,7 @@ from autonomous_development.ports.codex import (
 )
 from autonomous_development.ports.evidence import EvidenceStore
 
+
 class ReviewResult(TypedDict):
     summary: str
     blocking_findings: list[str]
