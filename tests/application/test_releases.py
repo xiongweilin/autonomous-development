@@ -26,6 +26,7 @@ from autonomous_development.domain.models import (
     VerificationCheck,
     VerificationRun,
 )
+from autonomous_development.ports.persistence import OperationConflictError
 
 
 def services() -> tuple[CycleService, ExperimentService, ReleaseService]:
@@ -348,8 +349,6 @@ def test_release_operation_conflicts_if_recomputed_decision_changes() -> None:
         expected_version=10,
         operation_id="release-conflict",
     )
-
-    from autonomous_development.ports.persistence import OperationConflictError
 
     with pytest.raises(OperationConflictError):
         releases.decide_and_apply_promotion(
