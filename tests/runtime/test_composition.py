@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import ClassVar
 
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
@@ -31,10 +32,10 @@ from autonomous_development.runtime.config import RuntimeSettings
 
 
 class FakeDBOS:
-    configured: list[object] = []
+    configured: ClassVar[list[object]] = []
     launches = 0
-    schedules: list[object] = []
-    destroys: list[int] = []
+    schedules: ClassVar[list[object]] = []
+    destroys: ClassVar[list[int]] = []
 
     def __init__(self, *, config: object) -> None:
         self.configured.append(config)
