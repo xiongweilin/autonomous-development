@@ -5,7 +5,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from autonomous_development.ports.command import CommandResult, CommandRunner, CommandSpec
+from autonomous_development.domain.commands import CommandResult, CommandSpec\nfrom autonomous_development.ports.command import CommandRunner
 
 
 class LocalCommandRunner(CommandRunner):
