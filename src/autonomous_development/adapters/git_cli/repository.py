@@ -241,6 +241,101 @@ class GitCliRepository(RepositoryProvider):
             raise GitRepositoryError("candidate commit persisted the wrong Codex thread")
         return committed
 
+    def promote_candidate(
+        self,
+        repository_root: Path,
+        default_branch: str,
+        *,
+        baseline_commit: str,
+        candidate_commit: str,
+        candidate_tree: str,
+    ) -> CandidateCommit:
+        root = repository_root.resolve()
+        if not root.is_dir():
+            raise GitRepositoryError(f"repository does not exist: {root}")
+        top = Path(self._run(root, "rev-parse", "--show-toplevel")).resolve()
+        if top != root:
+            raise GitRepositoryError(f"repository root mismatch: expected {root}, got {top}")
+        if self._run(root, "status", "--porcelain"):
+            raise GitRepositoryError("default branch checkout must be clean for source promotion")
+        branch = self._run(root, "branch", "--show-current")
+        if branch != default_branch:
+            observed_branch = branch or "detached HEAD"
+            raise GitRepositoryError(
+                f"source promotion requires {default_branch}, currently on {observed_branch}"
+            )
+
+        observed_candidate_tree = self._run(
+            root,
+            "rev-parse",
+            f"{candidate_commit}^{{tree}}",
+        )
+        if observed_candidate_tree != candidate_tree:
+            raise GitRepositoryError("candidate commit tree does not match recorded candidate tree")
+        merge_base = self._run(root, "merge-base", baseline_commit, candidate_commit)
+        if merge_base != baseline_commit:
+            raise GitRepositoryError("candidate commit is not descended from recorded baseline")
+
+        head = self._run(root, "rev-parse", "HEAD")
+        if head == candidate_commit:
+            return self._promoted_commit(
+                root,
+                baseline_commit=baseline_commit,
+                candidate_commit=candidate_commit,
+                candidate_tree=candidate_tree,
+            )
+        if head != baseline_commit:
+            raise GitRepositoryError(
+                "default branch moved after candidate creation; source promotion is blocked"
+            )
+
+        self._run(root, "merge", "--ff-only", candidate_commit)
+        return self._promoted_commit(
+            root,
+            baseline_commit=baseline_commit,
+            candidate_commit=candidate_commit,
+            candidate_tree=candidate_tree,
+        )
+
+    def _promoted_commit(
+        self,
+        root: Path,
+        *,
+        baseline_commit: str,
+        candidate_commit: str,
+        candidate_tree: str,
+    ) -> CandidateCommit:
+        head = self._run(root, "rev-parse", "HEAD")
+        tree = self._run(root, "rev-parse", "HEAD^{tree}")
+        if head != candidate_commit or tree != candidate_tree:
+            raise GitRepositoryError("default branch did not reconcile to the candidate identity")
+        changed_paths = _parse_nul_paths(
+            self._run(
+                root,
+                "diff",
+                "--name-only",
+                "--no-renames",
+                "-z",
+                baseline_commit,
+                candidate_commit,
+                include_trailing=True,
+            )
+        )
+        if not changed_paths:
+            raise GitRepositoryError("promoted candidate contains no source changes")
+        thread_id = self._run(
+            root,
+            "log",
+            "-1",
+            "--format=%(trailers:key=Autodev-Codex-Thread,valueonly)",
+        )
+        return CandidateCommit(
+            commit=head,
+            tree=tree,
+            changed_paths=changed_paths,
+            codex_thread_id=thread_id or None,
+        )
+
     def remove_worktree(
         self,
         baseline: RepositoryBaseline,

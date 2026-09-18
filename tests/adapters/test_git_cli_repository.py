@@ -151,3 +151,80 @@ def test_unsafe_cycle_id_is_rejected(tmp_path: Path) -> None:
             cycle_id="../escape",
             worktree_root=tmp_path / "worktrees",
         )
+
+
+
+def test_source_promotion_fast_forwards_default_branch_and_replays(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path)
+    provider = GitCliRepository()
+    baseline = provider.verify_baseline(repo, "main")
+    worktree = provider.create_worktree(
+        baseline,
+        cycle_id="cycle-promote",
+        worktree_root=tmp_path / "worktrees",
+    )
+    (worktree.path / "app.py").write_text("VALUE = 2\n", encoding="utf-8")
+    candidate = provider.commit_candidate(
+        worktree,
+        message="autodev: implement proposal-1",
+        codex_thread_id="thread-1",
+    )
+
+    first = provider.promote_candidate(
+        repo,
+        "main",
+        baseline_commit=baseline.commit,
+        candidate_commit=candidate.commit,
+        candidate_tree=candidate.tree,
+    )
+    second = provider.promote_candidate(
+        repo,
+        "main",
+        baseline_commit=baseline.commit,
+        candidate_commit=candidate.commit,
+        candidate_tree=candidate.tree,
+    )
+
+    assert first == second
+    assert run(repo, "rev-parse", "HEAD") == candidate.commit
+    assert run(repo, "rev-parse", "HEAD^{tree}") == candidate.tree
+    assert first.changed_paths == ("app.py",)
+
+
+def test_source_promotion_blocks_if_default_branch_moved(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path)
+    provider = GitCliRepository()
+    baseline = provider.verify_baseline(repo, "main")
+    worktree = provider.create_worktree(
+        baseline,
+        cycle_id="cycle-stale-promote",
+        worktree_root=tmp_path / "worktrees",
+    )
+    (worktree.path / "app.py").write_text("VALUE = 2\n", encoding="utf-8")
+    candidate = provider.commit_candidate(
+        worktree,
+        message="autodev: implement proposal-1",
+        codex_thread_id="thread-1",
+    )
+
+    (repo / "unrelated.txt").write_text("move main\n", encoding="utf-8")
+    run(repo, "add", ".")
+    run(
+        repo,
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.invalid",
+        "commit",
+        "-m",
+        "unrelated",
+    )
+
+    with pytest.raises(GitRepositoryError, match="default branch moved"):
+        provider.promote_candidate(
+            repo,
+            "main",
+            baseline_commit=baseline.commit,
+            candidate_commit=candidate.commit,
+            candidate_tree=candidate.tree,
+        )

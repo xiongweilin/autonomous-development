@@ -64,4 +64,14 @@ class RepositoryProvider(Protocol):
         codex_thread_id: str,
     ) -> CandidateCommit: ...
 
+    def promote_candidate(
+        self,
+        repository_root: Path,
+        default_branch: str,
+        *,
+        baseline_commit: str,
+        candidate_commit: str,
+        candidate_tree: str,
+    ) -> CandidateCommit: ...
+
     def remove_worktree(self, baseline: RepositoryBaseline, worktree: Worktree) -> None: ...
