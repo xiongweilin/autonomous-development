@@ -11,13 +11,13 @@ from urllib.parse import urlsplit
 from autonomous_development.domain.enums import VerificationStatus
 from autonomous_development.domain.models import CandidateRevision, VerificationCheck
 from autonomous_development.ports.evidence import EvidenceStore
-from autonomous_development.ports.quality import PerformanceGateFactory, QualityGate
 from autonomous_development.ports.process import (
     CommandRequest,
     CommandTimedOut,
     CommandUnavailable,
     ProcessRunner,
 )
+from autonomous_development.ports.quality import PerformanceGateFactory, QualityGate
 
 
 class K6PerformanceGate:
