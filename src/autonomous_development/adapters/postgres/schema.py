@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import JSON, Boolean, Column, Index, Integer, MetaData, String, Table
+from sqlalchemy import JSON, Boolean, Column, DateTime, Index, Integer, MetaData, String, Table
 
 metadata = MetaData()
 
@@ -76,4 +76,51 @@ release_decision_operations = Table(
     Column("gate_refs_json", JSON, nullable=False),
     Column("evidence_refs_json", JSON, nullable=False),
     Column("reason", String(512), nullable=False),
+)
+
+
+released_versions = Table(
+    "released_versions",
+    metadata,
+    Column("id", String(128), primary_key=True),
+    Column("target_id", String(128), nullable=False, index=True),
+    Column("source_commit", String(128), nullable=False),
+    Column("source_tree", String(128), nullable=False),
+    Column("artifact_digest", String(160), nullable=False),
+    Column("objective_revision_id", String(128), nullable=False),
+    Column("deployment_id", String(128), nullable=False),
+    Column("promoted_at", DateTime(timezone=True), nullable=False),
+)
+
+serving_releases = Table(
+    "serving_releases",
+    metadata,
+    Column("target_id", String(128), primary_key=True),
+    Column("release_id", String(128), nullable=False),
+)
+
+serving_release_operations = Table(
+    "serving_release_operations",
+    metadata,
+    Column("operation_id", String(192), primary_key=True),
+    Column("target_id", String(128), nullable=False, index=True),
+    Column("release_id", String(128), nullable=False),
+    Column("previous_release_id", String(128)),
+)
+
+user_feedback = Table(
+    "user_feedback",
+    metadata,
+    Column("id", String(128), primary_key=True),
+    Column("target_id", String(128), nullable=False, index=True),
+    Column("received_at", DateTime(timezone=True), nullable=False, index=True),
+    Column("kind", String(32), nullable=False),
+    Column("category", String(128), nullable=False),
+    Column("severity", Integer, nullable=False),
+    Column("provenance", String(256), nullable=False),
+    Column("release_id", String(128), index=True),
+    Column("deployment_id", String(128), index=True),
+    Column("experiment_id", String(128), index=True),
+    Column("request_ref", String(256)),
+    Column("free_text", String(4000)),
 )
