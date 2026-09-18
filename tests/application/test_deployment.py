@@ -10,6 +10,8 @@ from autonomous_development.ports.target_contract import (
     TargetContract,
     TargetDeploymentContract,
     TargetPerformanceContract,
+    TargetVerificationContract,
+    TargetVerificationGateContract,
 )
 
 
@@ -71,6 +73,25 @@ def test_deployment_service_uses_artifact_digest_and_contract() -> None:
         schema_version=1,
         target_id="target-1",
         build=TargetBuildContract("Dockerfile", ("uv.lock",)),
+        verification=TargetVerificationContract(
+            gates=(
+                TargetVerificationGateContract(
+                    id="static",
+                    command=("uv", "run", "ruff", "check", "."),
+                    timeout_seconds=60,
+                ),
+                TargetVerificationGateContract(
+                    id="tests",
+                    command=("uv", "run", "pytest", "-q"),
+                    timeout_seconds=60,
+                ),
+                TargetVerificationGateContract(
+                    id="security",
+                    command=("uv", "run", "python", "-m", "pip", "--version"),
+                    timeout_seconds=60,
+                ),
+            )
+        ),
         deployment=TargetDeploymentContract(8000, "/health", "/ready", 30),
         performance=TargetPerformanceContract(
             "tests/performance/smoke.js",

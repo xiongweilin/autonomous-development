@@ -39,6 +39,35 @@ class TargetBuildContract:
 
 
 @dataclass(frozen=True, slots=True)
+class TargetVerificationGateContract:
+    id: str
+    command: tuple[str, ...]
+    timeout_seconds: int = 900
+
+    def __post_init__(self) -> None:
+        if not self.id.strip():
+            raise ValueError("verification gate id must be non-empty")
+        if self.id == "performance":
+            raise ValueError("performance is reserved for the dedicated performance gate")
+        if not self.command or any(not item.strip() for item in self.command):
+            raise ValueError("verification gate command must be a non-empty argv")
+        if self.timeout_seconds < 1:
+            raise ValueError("verification gate timeout must be positive")
+
+
+@dataclass(frozen=True, slots=True)
+class TargetVerificationContract:
+    gates: tuple[TargetVerificationGateContract, ...]
+
+    def __post_init__(self) -> None:
+        if not self.gates:
+            raise ValueError("target requires at least one pre-deployment verification gate")
+        ids = tuple(gate.id for gate in self.gates)
+        if len(set(ids)) != len(ids):
+            raise ValueError("verification gate ids must be unique")
+
+
+@dataclass(frozen=True, slots=True)
 class TargetDeploymentContract:
     container_port: int
     health_path: str
@@ -107,6 +136,7 @@ class TargetContract:
     schema_version: int
     target_id: str
     build: TargetBuildContract
+    verification: TargetVerificationContract
     deployment: TargetDeploymentContract
     performance: TargetPerformanceContract
     canary: TargetCanaryContract
@@ -116,6 +146,10 @@ class TargetContract:
             raise ValueError("unsupported target contract schema")
         if not self.target_id.strip():
             raise ValueError("target_id must be non-empty")
+
+    @property
+    def mandatory_gates(self) -> tuple[str, ...]:
+        return tuple(gate.id for gate in self.verification.gates) + ("performance",)
 
 
 class TargetContractLoader(Protocol):
