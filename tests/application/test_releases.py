@@ -236,3 +236,31 @@ def test_hold_does_not_advance_cycle() -> None:
     )
     assert unchanged.state is CycleState.CANARYING
     assert unchanged.version == 9
+
+
+def test_unrecorded_rollback_cannot_change_cycle() -> None:
+    cycles, experiments, releases = services()
+    cycles.create(cycle())
+    experiments.create(experiment())
+    rollback = CanaryStageDecision(
+        kind=CanaryDecisionKind.ROLLBACK,
+        experiment_id="experiment-1",
+        stage_index=0,
+        next_stage_index=None,
+        evidence_refs=("canary:unrecorded",),
+        violated_guardrails=("candidate_error_rate",),
+        reason="unrecorded regression",
+    )
+
+    import pytest
+
+    with pytest.raises(ValueError, match="durable"):
+        releases.apply_canary_decision(
+            "cycle-1",
+            rollback,
+            expected_version=9,
+            operation_id="release-unrecorded",
+        )
+    persisted = cycles.get("cycle-1")
+    assert persisted.state is CycleState.CANARYING
+    assert persisted.version == 9
