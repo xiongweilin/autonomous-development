@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from autonomous_development.application.experiments import ExperimentService
 from autonomous_development.domain.canary import (
     CanaryGuardrails,
     CanaryStageDecision,
-    advance_experiment,
     evaluate_canary_stage,
 )
 from autonomous_development.domain.enums import CanaryDecisionKind
@@ -25,18 +25,38 @@ class CanaryService:
         self,
         traffic: TrafficDirector,
         observer: CanaryObserver,
+        experiments: ExperimentService,
     ) -> None:
         self._traffic = traffic
         self._observer = observer
+        self._experiments = experiments
 
     def run_stage(
         self,
-        experiment: Experiment,
+        experiment_id: str,
         guardrails: CanaryGuardrails,
         *,
         control_base_url: str,
         candidate_base_url: str,
+        operation_id: str,
     ) -> CanaryStageResult:
+        if not operation_id.strip():
+            raise ValueError("operation_id must be non-empty")
+
+        decision_operation_id = f"{operation_id}:decision"
+        replayed = self._experiments.replay_decision(decision_operation_id)
+        if replayed is not None:
+            experiment, decision = replayed
+            self._ensure_post_decision_routing(
+                experiment,
+                decision,
+                control_base_url=control_base_url,
+                candidate_base_url=candidate_base_url,
+                operation_id=operation_id,
+            )
+            return CanaryStageResult(experiment=experiment, decision=decision)
+
+        experiment = self._experiments.get(experiment_id)
         stage_index = experiment.current_stage_index
         stage = experiment.stages[stage_index]
         route = self._traffic.apply(
@@ -46,7 +66,7 @@ class CanaryService:
                 control_base_url=control_base_url,
                 candidate_base_url=candidate_base_url,
                 candidate_weight_percent=stage.weight_percent,
-                operation_id=f"canary:{experiment.id}:stage:{stage_index}",
+                operation_id=f"{operation_id}:traffic",
             )
         )
         try:
@@ -58,44 +78,62 @@ class CanaryService:
             )
         except Exception:
             self._restore_control(
-                experiment,
+                experiment_id=experiment.id,
                 stage_index=stage_index,
                 control_base_url=control_base_url,
                 candidate_base_url=candidate_base_url,
-                suffix="observer-failed",
+                operation_id=f"{operation_id}:observer-failed:restore",
             )
             raise
 
         decision = evaluate_canary_stage(experiment, evidence, guardrails)
-        if decision.kind in {CanaryDecisionKind.ROLLBACK, CanaryDecisionKind.HOLD}:
-            self._restore_control(
-                experiment,
-                stage_index=stage_index,
-                control_base_url=control_base_url,
-                candidate_base_url=candidate_base_url,
-                suffix=decision.kind.value,
-            )
-            return CanaryStageResult(experiment=experiment, decision=decision)
-        if decision.kind is CanaryDecisionKind.ADVANCE:
-            return CanaryStageResult(
-                experiment=advance_experiment(experiment, decision),
-                decision=decision,
-            )
-        return CanaryStageResult(experiment=experiment, decision=decision)
+        persisted = self._experiments.record_decision(
+            experiment.id,
+            decision,
+            expected_stage_index=stage_index,
+            operation_id=decision_operation_id,
+        )
+        self._ensure_post_decision_routing(
+            persisted,
+            decision,
+            control_base_url=control_base_url,
+            candidate_base_url=candidate_base_url,
+            operation_id=operation_id,
+        )
+        return CanaryStageResult(experiment=persisted, decision=decision)
+
+    def _ensure_post_decision_routing(
+        self,
+        experiment: Experiment,
+        decision: CanaryStageDecision,
+        *,
+        control_base_url: str,
+        candidate_base_url: str,
+        operation_id: str,
+    ) -> None:
+        if decision.kind not in {CanaryDecisionKind.ROLLBACK, CanaryDecisionKind.HOLD}:
+            return
+        self._restore_control(
+            experiment_id=experiment.id,
+            stage_index=decision.stage_index,
+            control_base_url=control_base_url,
+            candidate_base_url=candidate_base_url,
+            operation_id=f"{operation_id}:{decision.kind.value}:restore",
+        )
 
     def _restore_control(
         self,
-        experiment: Experiment,
         *,
+        experiment_id: str,
         stage_index: int,
         control_base_url: str,
         candidate_base_url: str,
-        suffix: str,
+        operation_id: str,
     ) -> None:
         self._traffic.restore_control(
-            experiment_id=experiment.id,
+            experiment_id=experiment_id,
             stage_index=stage_index,
             control_base_url=control_base_url,
             candidate_base_url=candidate_base_url,
-            operation_id=f"canary:{experiment.id}:stage:{stage_index}:{suffix}",
+            operation_id=operation_id,
         )
