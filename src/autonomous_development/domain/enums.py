@@ -49,6 +49,12 @@ class CanaryDecisionKind(StrEnum):
     PROMOTION_READY = "promotion-ready"
 
 
+class SoakDecisionKind(StrEnum):
+    HOLD = "hold"
+    ROLLBACK = "rollback"
+    COMPLETE = "complete"
+
+
 class ReleaseDecisionKind(StrEnum):
     PROMOTE = "promote"
     REJECT = "reject"
