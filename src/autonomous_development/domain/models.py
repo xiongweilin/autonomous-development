@@ -257,7 +257,9 @@ class BuildArtifact:
     source_tree_hash: str
     build_definition_digest: str
     dependency_lock_digest: str
+    build_evidence_ref: str
     sbom_digest: str
+    sbom_ref: str
     vulnerability_scan_ref: str
 
     def __post_init__(self) -> None:
@@ -268,7 +270,9 @@ class BuildArtifact:
             ("source tree hash", self.source_tree_hash),
             ("build definition digest", self.build_definition_digest),
             ("dependency lock digest", self.dependency_lock_digest),
+            ("build evidence ref", self.build_evidence_ref),
             ("sbom digest", self.sbom_digest),
+            ("sbom ref", self.sbom_ref),
             ("vulnerability scan ref", self.vulnerability_scan_ref),
         ):
             _required(value, field_name)
