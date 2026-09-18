@@ -34,7 +34,7 @@ def test_postgres_cycle_and_dbos_idempotency() -> None:
     )
 
     config: DBOSConfig = {
-        "name": "autonomous-development-integration",
+        "name": "autodev-integration",
         "application_version": "0.1.0",
         "system_database_url": dbos_url,
     }
