@@ -9,13 +9,21 @@ from sqlalchemy import create_engine
 
 from autonomous_development.adapters.postgres.cycles import SqlCycleRepository
 from autonomous_development.adapters.postgres.experiments import SqlExperimentRepository
+from autonomous_development.adapters.postgres.release_decisions import (
+    SqlReleaseDecisionRepository,
+)
 from autonomous_development.application.cycles import CycleService
 from autonomous_development.domain.canary import CanaryStageDecision
-from autonomous_development.domain.enums import CanaryDecisionKind, CycleState
+from autonomous_development.domain.enums import (
+    CanaryDecisionKind,
+    CycleState,
+    ReleaseDecisionKind,
+)
 from autonomous_development.domain.models import (
     CanaryStage,
     DevelopmentCycle,
     Experiment,
+    ReleaseDecision,
 )
 from autonomous_development.workflows.development_cycle import DevelopmentCycleWorkflow
 
@@ -135,6 +143,37 @@ def test_postgres_experiment_stage_decision_is_durable_and_idempotent() -> None:
             assert replay == first
             assert persisted == updated
             assert history == (first,)
+        finally:
+            reconnected.dispose()
+    finally:
+        engine.dispose()
+
+
+
+def test_postgres_release_decision_receipt_survives_reconnect() -> None:
+    database_url = os.environ["AUTODEV_DATABASE_URL"]
+    engine = create_engine(database_url)
+    repository = SqlReleaseDecisionRepository(engine)
+    suffix = uuid4().hex
+    operation_id = f"release-decision-{suffix}"
+    decision = ReleaseDecision(
+        kind=ReleaseDecisionKind.PROMOTE,
+        cycle_id=f"cycle-{suffix}",
+        gate_refs=("static", "tests"),
+        evidence_refs=(f"canary:{suffix}:stage-0", f"canary:{suffix}:stage-1"),
+        reason="all required evidence passed",
+    )
+
+    try:
+        first = repository.record(operation_id, decision)
+        replay = repository.record(operation_id, decision)
+        engine.dispose()
+
+        reconnected = create_engine(database_url)
+        try:
+            recovered = SqlReleaseDecisionRepository(reconnected).get(operation_id)
+            assert replay == first
+            assert recovered == first
         finally:
             reconnected.dispose()
     finally:
