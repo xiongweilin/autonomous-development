@@ -16,6 +16,7 @@ from autonomous_development.adapters.postgres.target_registry import (
 from autonomous_development.application.release_catalog import ReleaseCatalogService
 from autonomous_development.application.target_registry import TargetRegistryService
 from autonomous_development.domain.models import (
+    CanaryStage,
     DevelopmentTarget,
     MutationPolicy,
     ProductObjectiveRevision,
@@ -31,7 +32,6 @@ from autonomous_development.ports.target_contract import (
     TargetVerificationContract,
     TargetVerificationGateContract,
 )
-from autonomous_development.domain.models import CanaryStage
 from autonomous_development.runtime.config import RuntimeSettings
 from autonomous_development.runtime.readiness import RuntimeReadinessService
 
