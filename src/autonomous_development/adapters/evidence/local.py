@@ -29,7 +29,6 @@ class LocalEvidenceStore(EvidenceStore):
         safe_name = _safe(name)
         directory = self._root / safe_category
         directory.mkdir(parents=True, exist_ok=True)
-        target = directory / f"{safe_name}.json"
         encoded = json.dumps(
             dict(payload),
             ensure_ascii=False,
@@ -37,9 +36,22 @@ class LocalEvidenceStore(EvidenceStore):
             separators=(",", ":"),
         ).encode("utf-8")
         digest = hashlib.sha256(encoded).hexdigest()
+        target = directory / f"{safe_name}-{digest}.json"
+
+        if target.exists():
+            if target.read_bytes() != encoded:
+                raise RuntimeError("evidence digest collision or mutated evidence")
+            return f"file:{target}#sha256:{digest}"
+
         temporary = directory / f".{safe_name}.{uuid4().hex}.tmp"
         temporary.write_bytes(encoded)
-        os.replace(temporary, target)
+        try:
+            os.link(temporary, target)
+        except FileExistsError:
+            if target.read_bytes() != encoded:
+                raise RuntimeError("evidence digest collision or mutated evidence")
+        finally:
+            temporary.unlink(missing_ok=True)
         return f"file:{target}#sha256:{digest}"
 
 
