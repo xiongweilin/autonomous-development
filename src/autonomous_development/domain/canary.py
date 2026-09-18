@@ -106,7 +106,7 @@ def evaluate_canary_stage(
     if evidence.weight_percent != stage.weight_percent:
         raise ValueError("observed canary weight does not match configured stage")
 
-    violations = _guardrail_violations(evidence, guardrails)
+    violations = stage_guardrail_violations(evidence, guardrails)
     if violations:
         return CanaryStageDecision(
             kind=CanaryDecisionKind.ROLLBACK,
@@ -118,7 +118,7 @@ def evaluate_canary_stage(
             reason="hard canary regression exceeded configured guardrails",
         )
 
-    insufficient = _insufficient_reasons(stage, evidence)
+    insufficient = stage_insufficient_reasons(stage, evidence)
     if insufficient:
         return CanaryStageDecision(
             kind=CanaryDecisionKind.HOLD,
@@ -167,7 +167,7 @@ def advance_experiment(
     return replace(experiment, current_stage_index=decision.next_stage_index)
 
 
-def _guardrail_violations(
+def stage_guardrail_violations(
     evidence: CanaryStageEvidence,
     guardrails: CanaryGuardrails,
 ) -> tuple[str, ...]:
@@ -196,7 +196,7 @@ def _guardrail_violations(
     return tuple(violations)
 
 
-def _insufficient_reasons(
+def stage_insufficient_reasons(
     stage: CanaryStage,
     evidence: CanaryStageEvidence,
 ) -> tuple[str, ...]:

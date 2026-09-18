@@ -53,6 +53,13 @@ class ServingReleaseReceipt:
     previous_release_id: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class SoakDecisionReceipt:
+    operation_id: str
+    cycle_id: str
+    decision: PostPromotionSoakDecision
+
+
 class ConcurrentCycleError(RuntimeError):
     """A target already has another active mutating cycle."""
 
@@ -167,3 +174,15 @@ class ChangeProposalRepository(Protocol):
     def add(self, proposal: ChangeProposal) -> ChangeProposal: ...
 
     def get(self, proposal_id: str) -> ChangeProposal | None: ...
+
+
+
+class SoakDecisionRepository(Protocol):
+    def get(self, operation_id: str) -> SoakDecisionReceipt | None: ...
+
+    def record(
+        self,
+        operation_id: str,
+        cycle_id: str,
+        decision: PostPromotionSoakDecision,
+    ) -> SoakDecisionReceipt: ...
