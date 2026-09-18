@@ -165,11 +165,14 @@ class CodexAppServer(CodexProvider):
 
     def _resolve_thread_id(self, request: CodexTurnRequest) -> str | None:
         journaled = self._load_thread(request.resume_key)
-        if request.thread_id is not None and journaled is not None:
-            if request.thread_id != journaled:
-                raise CodexProviderError(
-                    "explicit Codex thread id conflicts with durable thread journal"
-                )
+        if (
+            request.thread_id is not None
+            and journaled is not None
+            and request.thread_id != journaled
+        ):
+            raise CodexProviderError(
+                "explicit Codex thread id conflicts with durable thread journal"
+            )
         return request.thread_id or journaled
 
     def _load_thread(self, resume_key: str | None) -> str | None:
