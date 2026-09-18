@@ -63,6 +63,17 @@ class SoakDecisionReceipt:
     decision: PostPromotionSoakDecision
 
 
+@dataclass(frozen=True, slots=True)
+class FeedbackTriggerReceipt:
+    feedback_id: str
+    target_id: str
+    release_id: str
+    evidence_window_id: str
+    cycle_id: str
+    proposal_id: str | None
+    outcome: str
+
+
 class ConcurrentCycleError(RuntimeError):
     """A target already has another active mutating cycle."""
 
@@ -204,3 +215,10 @@ class ObjectiveRepository(Protocol):
     def add(self, objective: ProductObjectiveRevision) -> ProductObjectiveRevision: ...
 
     def get(self, objective_id: str) -> ProductObjectiveRevision | None: ...
+
+
+
+class FeedbackTriggerRepository(Protocol):
+    def get(self, feedback_id: str) -> FeedbackTriggerReceipt | None: ...
+
+    def record(self, receipt: FeedbackTriggerReceipt) -> FeedbackTriggerReceipt: ...

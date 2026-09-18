@@ -31,6 +31,9 @@ class CycleService:
             raise CycleNotFoundError(cycle_id)
         return cycle
 
+    def active_for_target(self, target_id: str) -> DevelopmentCycle | None:
+        return self._repository.find_active_for_target(target_id)
+
     def transition(
         self,
         cycle_id: str,

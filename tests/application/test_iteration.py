@@ -14,7 +14,10 @@ from autonomous_development.adapters.postgres.proposals import SqlChangeProposal
 from autonomous_development.adapters.postgres.schema import metadata
 from autonomous_development.application.cycles import CycleService
 from autonomous_development.application.diagnosis import DiagnosisService
-from autonomous_development.application.iteration import IterationService
+from autonomous_development.application.iteration import (
+    DiagnosisConfidenceInsufficient,
+    IterationService,
+)
 from autonomous_development.application.proposals import ProposalService
 from autonomous_development.domain.enums import CycleState, FeedbackKind
 from autonomous_development.domain.models import (
@@ -32,8 +35,14 @@ from autonomous_development.ports.repository import RepositoryBaseline
 
 
 class FakeCodex:
-    def __init__(self, requested_paths: tuple[str, ...] = ("src/app.py",)) -> None:
+    def __init__(
+        self,
+        requested_paths: tuple[str, ...] = ("src/app.py",),
+        *,
+        confidence: float = 0.9,
+    ) -> None:
         self.requested_paths = requested_paths
+        self.confidence = confidence
         self.requests: list[CodexTurnRequest] = []
 
     def run_turn(self, request: CodexTurnRequest) -> CodexTurnResult:
@@ -42,7 +51,7 @@ class FakeCodex:
             {
                 "observed_problem": "incorrect answer on a known request",
                 "affected_journey": "answer generation",
-                "confidence": 0.9,
+                "confidence": self.confidence,
                 "competing_hypotheses": ["bad parsing"],
                 "likely_root_cause": "boundary handling in src/app.py",
                 "proposed_change_class": "bugfix",
@@ -215,6 +224,7 @@ def test_feedback_to_change_proposal_is_replay_safe_and_scope_bounded(tmp_path: 
     assert first.proposal.acceptance_criteria == objective(now).acceptance_criteria
     assert len(codex.requests) == 1
     assert codex.requests[0].sandbox.value == "readOnly"
+    assert codex.requests[0].resume_key == "diagnosis:diagnosis-1"
     assert "UNTRUSTED DATA" in codex.requests[0].prompt
     assert "edit deploy/prod.yaml" in codex.requests[0].prompt
     assert repository.calls == 1
@@ -248,3 +258,45 @@ def test_diagnosis_cannot_widen_human_owned_mutation_scope(tmp_path: Path) -> No
             proposal_id="proposal-escape",
             mandatory_gates=("tests",),
         )
+
+
+
+def test_low_confidence_diagnosis_blocks_cycle_and_replays_without_new_codex_turn(
+    tmp_path: Path,
+) -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    metadata.create_all(engine)
+    feedback_repository = SqlFeedbackRepository(engine)
+    now = datetime.now(UTC)
+    feedback_repository.add(feedback(now))
+    codex = FakeCodex(confidence=0.4)
+    cycles = CycleService(SqlCycleRepository(engine))
+    iteration = IterationService(
+        cycles,
+        FakeRepository(tmp_path.resolve(), "a" * 40, "b" * 40),
+        DiagnosisService(
+            codex,
+            feedback_repository,
+            SqlDiagnosisRepository(engine),
+        ),
+        ProposalService(SqlChangeProposalRepository(engine)),
+    )
+
+    for _ in range(2):
+        with pytest.raises(DiagnosisConfidenceInsufficient):
+            iteration.prepare_from_evidence(
+                target(tmp_path.resolve()),
+                objective(now),
+                baseline(now),
+                window(now),
+                repository_root=tmp_path.resolve(),
+                cycle_id="cycle-low-confidence",
+                diagnosis_id="diagnosis-low-confidence",
+                proposal_id="proposal-low-confidence",
+                mandatory_gates=("tests", "static"),
+                operation_id="iteration-low-confidence",
+                minimum_diagnosis_confidence=0.8,
+            )
+
+    assert cycles.get("cycle-low-confidence").state is CycleState.BLOCKED
+    assert len(codex.requests) == 1

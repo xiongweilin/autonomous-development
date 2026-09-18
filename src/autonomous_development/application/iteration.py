@@ -26,6 +26,22 @@ class IterationPreparation:
     proposal: ChangeProposal
 
 
+class DiagnosisConfidenceInsufficient(RuntimeError):
+    def __init__(
+        self,
+        cycle: DevelopmentCycle,
+        diagnosis: Diagnosis,
+        threshold: float,
+    ) -> None:
+        self.cycle = cycle
+        self.diagnosis = diagnosis
+        self.threshold = threshold
+        super().__init__(
+            f"diagnosis confidence {diagnosis.confidence:.3f} is below "
+            f"required threshold {threshold:.3f}"
+        )
+
+
 class IterationService:
     def __init__(
         self,
@@ -52,8 +68,11 @@ class IterationService:
         proposal_id: str,
         mandatory_gates: tuple[str, ...],
         operation_id: str,
+        minimum_diagnosis_confidence: float = 0.0,
     ) -> IterationPreparation:
         _validate_context(target, objective, baseline, window, repository_root, operation_id)
+        if not 0.0 <= minimum_diagnosis_confidence <= 1.0:
+            raise ValueError("minimum diagnosis confidence must be between 0 and 1")
 
         try:
             cycle = self._cycles.get(cycle_id)
@@ -70,6 +89,16 @@ class IterationService:
 
         if cycle.change_proposal_id is not None:
             return self._load_prepared(cycle, diagnosis_id, proposal_id)
+
+        if cycle.state is CycleState.BLOCKED and cycle.diagnosis_id is not None:
+            diagnosis = self._require_diagnosis(cycle, diagnosis_id)
+            if diagnosis.confidence < minimum_diagnosis_confidence:
+                raise DiagnosisConfidenceInsufficient(
+                    cycle,
+                    diagnosis,
+                    minimum_diagnosis_confidence,
+                )
+            raise RuntimeError("cycle is blocked despite sufficient diagnosis confidence")
 
         if cycle.state is CycleState.NEW:
             observed = self._repository.verify_baseline(
@@ -112,6 +141,20 @@ class IterationService:
             )
         else:
             diagnosis = self._require_diagnosis(cycle, diagnosis_id)
+
+        if diagnosis.confidence < minimum_diagnosis_confidence:
+            if cycle.state is CycleState.DIAGNOSED:
+                cycle = self._cycles.transition(
+                    cycle.id,
+                    CycleState.BLOCKED,
+                    expected_version=cycle.version,
+                    operation_id=f"{operation_id}:low-confidence",
+                )
+            raise DiagnosisConfidenceInsufficient(
+                cycle,
+                diagnosis,
+                minimum_diagnosis_confidence,
+            )
 
         if cycle.state is CycleState.DIAGNOSED:
             proposal = self._proposals.from_diagnosis(
