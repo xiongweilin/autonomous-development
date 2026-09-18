@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -67,8 +69,10 @@ class CommandQualityGate:
             payload.update(
                 {
                     "returncode": result.returncode,
-                    "stdout": result.stdout,
-                    "stderr": result.stderr,
+                    "stdout_bytes": len(result.stdout.encode("utf-8")),
+                    "stdout_sha256": _digest_text(result.stdout),
+                    "stderr_bytes": len(result.stderr.encode("utf-8")),
+                    "stderr_sha256": _digest_text(result.stderr),
                 }
             )
         except (CommandUnavailable, CommandTimedOut) as exc:
@@ -98,3 +102,7 @@ class CommandQualityGate:
                 "duration_ms": max(0, int((ended - started).total_seconds() * 1000)),
             },
         )
+
+
+def _digest_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
