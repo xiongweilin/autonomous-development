@@ -23,6 +23,31 @@ from autonomous_development.domain.models import (
 from autonomous_development.ports.traffic import TrafficRouteState, TrafficSplit
 
 
+class FakeReleaseRuntime:
+    def __init__(self, catalog: ReleaseCatalogService) -> None:
+        self.catalog = catalog
+        self.calls: list[str] = []
+
+    def resolve(self, release_id: str):
+        from autonomous_development.ports.deployment import DeploymentRuntime
+
+        self.calls.append(release_id)
+        port = 4100 if release_id == "release-0" else 4200
+        deployment_id = "deployment-0" if release_id == "release-0" else "deployment-1"
+        return DeploymentRuntime(
+            deployment_id=deployment_id,
+            container_id=f"container-{release_id}",
+            base_url=f"http://127.0.0.1:{port}",
+            evidence_ref=f"runtime:{release_id}",
+        )
+
+    def resolve_serving(self, target_id: str):
+        release = self.catalog.serving(target_id)
+        if release is None:
+            raise ValueError("missing serving release")
+        return release, self.resolve(release.id)
+
+
 class FakeTraffic:
     def __init__(self) -> None:
         self.applied: list[TrafficSplit] = []
@@ -140,12 +165,14 @@ def test_soak_regression_restores_baseline_traffic_and_serving_release() -> None
 
     traffic = FakeTraffic()
     observer = RegressionObserver()
+    runtime = FakeReleaseRuntime(catalog)
     service = PostPromotionSoakService(
         cycles,
         traffic,
         observer,
         catalog,
         SqlSoakDecisionRepository(engine),
+        runtime,  # type: ignore[arg-type]
     )
     soaking = service.start("cycle-1", operation_id="soak:start")
     assert soaking.state is CycleState.SOAKING
@@ -154,8 +181,6 @@ def test_soak_regression_restores_baseline_traffic_and_serving_release() -> None
         "cycle-1",
         CanaryStage(100, 60, 100),
         CanaryGuardrails(0.02, 0.01, 250.0, 1.25),
-        control_base_url="http://127.0.0.1:4100",
-        candidate_base_url="http://127.0.0.1:4200",
         route_operation_id="soak:route",
         decision_operation_id="soak:decision:0",
     )
@@ -165,20 +190,18 @@ def test_soak_regression_restores_baseline_traffic_and_serving_release() -> None
         "cycle-1",
         decision_operation_id="soak:decision:0",
         effect_operation_id="soak:effect:0",
-        control_base_url="http://127.0.0.1:4100",
-        candidate_base_url="http://127.0.0.1:4200",
     )
     assert rolled_back.state is CycleState.ROLLED_BACK
     serving = catalog.serving("target-1")
     assert serving is not None
     assert serving.id == "release-0"
     assert traffic.restored == ["soak:effect:0:traffic"]
+    assert traffic.applied[0].control_base_url == "http://127.0.0.1:4100"
+    assert traffic.applied[0].candidate_base_url == "http://127.0.0.1:4200"
 
     replay = service.apply(
         "cycle-1",
         decision_operation_id="soak:decision:0",
         effect_operation_id="soak:effect:0",
-        control_base_url="http://127.0.0.1:4100",
-        candidate_base_url="http://127.0.0.1:4200",
     )
     assert replay == rolled_back

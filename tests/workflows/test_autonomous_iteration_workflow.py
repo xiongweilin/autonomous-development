@@ -140,6 +140,20 @@ class FakeBuild:
         )
 
 
+class FakeReleaseRuntime:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def resolve(self, release_id: str) -> DeploymentRuntime:
+        self.calls.append(release_id)
+        return DeploymentRuntime(
+            deployment_id="deployment-0",
+            container_id="control-container",
+            base_url="http://127.0.0.1:4100",
+            evidence_ref="release-runtime:control",
+        )
+
+
 class FakeDeployment:
     def __init__(self) -> None:
         self.calls = 0
@@ -370,6 +384,7 @@ def test_dbos_iteration_promotes_and_replay_does_not_repeat_effects(tmp_path: Pa
     verification = FakeVerification()
     build = FakeBuild()
     deployment = FakeDeployment()
+    release_runtime = FakeReleaseRuntime()
     performance = FakePerformanceFactory()
 
     config: DBOSConfig = {
@@ -390,12 +405,12 @@ def test_dbos_iteration_promotes_and_replay_does_not_repeat_effects(tmp_path: Pa
         canary=canary,
         releases=releases,
         finalization=finalization,
+        release_runtime=release_runtime,  # type: ignore[arg-type]
         source_promotion=source_promotion,  # type: ignore[arg-type]
         contract=contract(),
         repository_root=tmp_path.resolve(),
         worktree_root=(tmp_path / "worktrees").resolve(),
         default_branch="main",
-        control_base_url="http://127.0.0.1:4100",
         canary_hold_sleep_seconds=0.001,
         config_name="test-autonomous-iteration",
     )
@@ -428,6 +443,7 @@ def test_dbos_iteration_promotes_and_replay_does_not_repeat_effects(tmp_path: Pa
         assert performance.gate.calls == 1
         assert traffic.applied == 1
         assert observer.calls == 1
+        assert release_runtime.calls == ["release-0"]
         assert source_promotion.calls == 1
     finally:
         DBOS.destroy(workflow_completion_timeout_sec=5)

@@ -17,8 +17,6 @@ class PostPromotionSoakWorkflow(DBOSConfiguredInstance):
         *,
         stage: CanaryStage,
         guardrails: CanaryGuardrails,
-        control_base_url: str,
-        candidate_base_url: str,
         hold_sleep_seconds: float = 30.0,
         config_name: str = "post-promotion-soak-v1",
     ) -> None:
@@ -29,8 +27,6 @@ class PostPromotionSoakWorkflow(DBOSConfiguredInstance):
         self._service = service
         self._stage = stage
         self._guardrails = guardrails
-        self._control_base_url = control_base_url
-        self._candidate_base_url = candidate_base_url
         self._hold_sleep_seconds = hold_sleep_seconds
         super().__init__(config_name=config_name)
 
@@ -80,8 +76,6 @@ class PostPromotionSoakWorkflow(DBOSConfiguredInstance):
             cycle_id,
             self._stage,
             self._guardrails,
-            control_base_url=self._control_base_url,
-            candidate_base_url=self._candidate_base_url,
             route_operation_id=route_operation_id,
             decision_operation_id=decision_operation_id,
         )
@@ -99,8 +93,6 @@ class PostPromotionSoakWorkflow(DBOSConfiguredInstance):
             cycle_id,
             decision_operation_id=decision_operation_id,
             effect_operation_id=effect_operation_id,
-            control_base_url=self._control_base_url,
-            candidate_base_url=self._candidate_base_url,
         )
         return _cycle_document(cycle)
 

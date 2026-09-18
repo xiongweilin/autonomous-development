@@ -24,6 +24,31 @@ from autonomous_development.workflows.post_promotion_soak import (
 )
 
 
+class FakeReleaseRuntime:
+    def __init__(self, catalog: ReleaseCatalogService) -> None:
+        self.catalog = catalog
+        self.calls: list[str] = []
+
+    def resolve(self, release_id: str):
+        from autonomous_development.ports.deployment import DeploymentRuntime
+
+        self.calls.append(release_id)
+        port = 4100 if release_id == "release-0" else 4200
+        deployment_id = "deployment-0" if release_id == "release-0" else "deployment-1"
+        return DeploymentRuntime(
+            deployment_id=deployment_id,
+            container_id=f"container-{release_id}",
+            base_url=f"http://127.0.0.1:{port}",
+            evidence_ref=f"runtime:{release_id}",
+        )
+
+    def resolve_serving(self, target_id: str):
+        release = self.catalog.serving(target_id)
+        if release is None:
+            raise ValueError("missing serving release")
+        return release, self.resolve(release.id)
+
+
 class IdempotentTraffic:
     def __init__(self) -> None:
         self.states: dict[str, TrafficRouteState] = {}
@@ -148,12 +173,14 @@ def test_dbos_soak_holds_then_completes_and_replay_is_stable(tmp_path: Path) -> 
 
     traffic = IdempotentTraffic()
     observer = AccumulatingObserver()
+    runtime = FakeReleaseRuntime(catalog)
     service = PostPromotionSoakService(
         cycles,
         traffic,
         observer,
         catalog,
         SqlSoakDecisionRepository(engine),
+        runtime,  # type: ignore[arg-type]
     )
 
     config: DBOSConfig = {
@@ -166,8 +193,6 @@ def test_dbos_soak_holds_then_completes_and_replay_is_stable(tmp_path: Path) -> 
         service,
         stage=CanaryStage(100, 10, 20),
         guardrails=CanaryGuardrails(0.02, 0.01, 250.0, 1.25),
-        control_base_url="http://127.0.0.1:4100",
-        candidate_base_url="http://127.0.0.1:4200",
         hold_sleep_seconds=0.001,
         config_name="test-post-promotion-soak",
     )
@@ -184,6 +209,7 @@ def test_dbos_soak_holds_then_completes_and_replay_is_stable(tmp_path: Path) -> 
         assert observer.calls == 2
         assert observer.generations == [1, 1]
         assert traffic.creations == 1
+        assert set(runtime.calls) == {"release-0", "release-1"}
         serving = catalog.serving("target-1")
         assert serving is not None
         assert serving.id == "release-1"
