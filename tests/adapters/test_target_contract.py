@@ -15,6 +15,18 @@ target_id = "sample-agent"
 dockerfile = "Dockerfile"
 dependency_locks = ["uv.lock"]
 
+[verification]
+
+[[verification.gates]]
+id = "static"
+command = ["uv", "run", "ruff", "check", "."]
+timeout_seconds = 120
+
+[[verification.gates]]
+id = "tests"
+command = ["uv", "run", "pytest", "-q"]
+timeout_seconds = 600
+
 [deployment]
 container_port = 8000
 health_path = "/health"
@@ -57,6 +69,15 @@ def test_loads_strict_target_contract(tmp_path: Path) -> None:
     contract = TomlTargetContractLoader().load(str(tmp_path))
     assert contract.target_id == "sample-agent"
     assert contract.build.dependency_locks == ("uv.lock",)
+    assert tuple(gate.id for gate in contract.verification.gates) == ("static", "tests")
+    assert contract.verification.gates[0].command == (
+        "uv",
+        "run",
+        "ruff",
+        "check",
+        ".",
+    )
+    assert contract.mandatory_gates == ("static", "tests", "performance")
     assert contract.deployment.container_port == 8000
     assert contract.performance.required_threshold_metrics == (
         "http_req_failed",
@@ -93,4 +114,29 @@ def test_canary_contract_requires_final_100_percent_stage(tmp_path: Path) -> Non
     )
     path.write_text(content, encoding="utf-8")
     with pytest.raises(ValueError, match="end at 100"):
+        TomlTargetContractLoader().load(str(tmp_path))
+
+
+def test_verification_gate_ids_must_be_unique(tmp_path: Path) -> None:
+    _write_contract(tmp_path)
+    path = tmp_path / "autonomous-development.toml"
+    content = path.read_text(encoding="utf-8").replace(
+        'id = "tests"',
+        'id = "static"',
+    )
+    path.write_text(content, encoding="utf-8")
+    with pytest.raises(ValueError, match="unique"):
+        TomlTargetContractLoader().load(str(tmp_path))
+
+
+def test_performance_gate_id_is_reserved(tmp_path: Path) -> None:
+    _write_contract(tmp_path)
+    path = tmp_path / "autonomous-development.toml"
+    content = path.read_text(encoding="utf-8").replace(
+        'id = "static"',
+        'id = "performance"',
+        1,
+    )
+    path.write_text(content, encoding="utf-8")
+    with pytest.raises(ValueError, match="reserved"):
         TomlTargetContractLoader().load(str(tmp_path))

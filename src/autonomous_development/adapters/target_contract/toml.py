@@ -12,6 +12,8 @@ from autonomous_development.ports.target_contract import (
     TargetContractLoader,
     TargetDeploymentContract,
     TargetPerformanceContract,
+    TargetVerificationContract,
+    TargetVerificationGateContract,
 )
 
 
@@ -26,14 +28,24 @@ class TomlTargetContractLoader(TargetContractLoader):
         document = tomllib.loads((root / self._filename).read_text(encoding="utf-8"))
         _exact_keys(
             document,
-            {"schema_version", "target_id", "build", "deployment", "performance", "canary"},
+            {
+                "schema_version",
+                "target_id",
+                "build",
+                "verification",
+                "deployment",
+                "performance",
+                "canary",
+            },
             "target contract",
         )
         build = _table(document, "build")
+        verification = _table(document, "verification")
         deployment = _table(document, "deployment")
         performance = _table(document, "performance")
         canary = _table(document, "canary")
         _exact_keys(build, {"dockerfile", "dependency_locks"}, "build")
+        _exact_keys(verification, {"gates"}, "verification")
         _exact_keys(
             deployment,
             {"container_port", "health_path", "readiness_path", "startup_timeout_seconds"},
@@ -61,6 +73,9 @@ class TomlTargetContractLoader(TargetContractLoader):
             build=TargetBuildContract(
                 dockerfile=_string(build, "dockerfile"),
                 dependency_locks=_string_tuple(build, "dependency_locks"),
+            ),
+            verification=TargetVerificationContract(
+                gates=_verification_gates(verification),
             ),
             deployment=TargetDeploymentContract(
                 container_port=_int(deployment, "container_port"),
@@ -132,6 +147,32 @@ def _string_tuple(document: dict[str, Any], key: str) -> tuple[str, ...]:
     ):
         raise ValueError(f"{key} must be a non-empty string array")
     return tuple(value)
+
+
+def _verification_gates(
+    document: dict[str, Any],
+) -> tuple[TargetVerificationGateContract, ...]:
+    raw = document.get("gates")
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("verification gates must be a non-empty table array")
+    gates: list[TargetVerificationGateContract] = []
+    for index, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise ValueError(f"verification gate {index} must be a table")
+        normalized = {str(key): value for key, value in item.items()}
+        _exact_keys(
+            normalized,
+            {"id", "command", "timeout_seconds"},
+            f"verification gate {index}",
+        )
+        gates.append(
+            TargetVerificationGateContract(
+                id=_string(normalized, "id"),
+                command=_string_tuple(normalized, "command"),
+                timeout_seconds=_int(normalized, "timeout_seconds"),
+            )
+        )
+    return tuple(gates)
 
 
 def _stages(document: dict[str, Any]) -> tuple[CanaryStage, ...]:

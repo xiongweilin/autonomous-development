@@ -44,6 +44,8 @@ from autonomous_development.ports.target_contract import (
     TargetContract,
     TargetDeploymentContract,
     TargetPerformanceContract,
+    TargetVerificationContract,
+    TargetVerificationGateContract,
 )
 from autonomous_development.ports.traffic import TrafficRouteState, TrafficSplit
 from autonomous_development.workflows.autonomous_iteration import (
@@ -276,6 +278,25 @@ def contract() -> TargetContract:
         schema_version=1,
         target_id="target-1",
         build=TargetBuildContract("Dockerfile", ("uv.lock",)),
+        verification=TargetVerificationContract(
+            gates=(
+                TargetVerificationGateContract(
+                    id="static",
+                    command=("uv", "run", "ruff", "check", "."),
+                    timeout_seconds=60,
+                ),
+                TargetVerificationGateContract(
+                    id="tests",
+                    command=("uv", "run", "pytest", "-q"),
+                    timeout_seconds=60,
+                ),
+                TargetVerificationGateContract(
+                    id="security",
+                    command=("uv", "run", "python", "-m", "pip", "--version"),
+                    timeout_seconds=60,
+                ),
+            )
+        ),
         deployment=TargetDeploymentContract(8000, "/health", "/ready", 30),
         performance=TargetPerformanceContract(
             "tests/performance/smoke.js",
