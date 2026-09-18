@@ -1,6 +1,5 @@
-from sqlalchemy import create_engine
-
 import pytest
+from sqlalchemy import create_engine
 
 from autonomous_development.adapters.postgres.feedback_triggers import (
     SqlFeedbackTriggerRepository,
