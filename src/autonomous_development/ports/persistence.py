@@ -9,9 +9,11 @@ from autonomous_development.domain.enums import CanaryDecisionKind, CycleState
 from autonomous_development.domain.models import (
     ChangeProposal,
     DevelopmentCycle,
+    DevelopmentTarget,
     Diagnosis,
     EvidenceWindow,
     Experiment,
+    ProductObjectiveRevision,
     ReleaseDecision,
     ReleasedVersion,
     UserFeedback,
@@ -187,3 +189,18 @@ class SoakDecisionRepository(Protocol):
         cycle_id: str,
         decision: PostPromotionSoakDecision,
     ) -> SoakDecisionReceipt: ...
+
+
+
+class TargetRepository(Protocol):
+    def add(self, target: DevelopmentTarget) -> DevelopmentTarget: ...
+
+    def get(self, target_id: str) -> DevelopmentTarget | None: ...
+
+    def list_all(self) -> tuple[DevelopmentTarget, ...]: ...
+
+
+class ObjectiveRepository(Protocol):
+    def add(self, objective: ProductObjectiveRevision) -> ProductObjectiveRevision: ...
+
+    def get(self, objective_id: str) -> ProductObjectiveRevision | None: ...
