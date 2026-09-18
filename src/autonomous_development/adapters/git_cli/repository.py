@@ -57,38 +57,164 @@ class GitCliRepository(RepositoryProvider):
         path = (root / safe_id).resolve()
         if root not in path.parents:
             raise GitRepositoryError("resolved worktree escaped its configured root")
-        if path.exists():
-            raise GitRepositoryError(f"worktree path already exists: {path}")
         branch = f"autodev/{safe_id}"
-        self._run(
-            baseline.repository_root,
-            "worktree",
-            "add",
-            "-b",
-            branch,
-            str(path),
-            baseline.commit,
+
+        if path.exists():
+            self._validate_existing_worktree(path, branch, baseline.commit)
+            return Worktree(path=path, branch=branch, base_commit=baseline.commit)
+
+        self._run(baseline.repository_root, "worktree", "prune")
+        branch_exists = (
+            self._returncode(
+                baseline.repository_root,
+                "show-ref",
+                "--verify",
+                "--quiet",
+                f"refs/heads/{branch}",
+            )
+            == 0
         )
+        if branch_exists:
+            self._run(
+                baseline.repository_root,
+                "worktree",
+                "add",
+                str(path),
+                branch,
+            )
+        else:
+            self._run(
+                baseline.repository_root,
+                "worktree",
+                "add",
+                "-b",
+                branch,
+                str(path),
+                baseline.commit,
+            )
+        self._validate_existing_worktree(path, branch, baseline.commit)
         return Worktree(path=path, branch=branch, base_commit=baseline.commit)
 
     def changed_paths(self, worktree: Worktree) -> tuple[str, ...]:
-        output = self._run(
-            worktree.path,
-            "status",
-            "--porcelain=v1",
-            "-z",
-            include_trailing=True,
+        tracked = _parse_nul_paths(
+            self._run(
+                worktree.path,
+                "diff",
+                "--name-only",
+                "--no-renames",
+                "-z",
+                "HEAD",
+                include_trailing=True,
+            )
         )
-        return _parse_porcelain_paths(output)
+        staged = _parse_nul_paths(
+            self._run(
+                worktree.path,
+                "diff",
+                "--cached",
+                "--name-only",
+                "--no-renames",
+                "-z",
+                "HEAD",
+                include_trailing=True,
+            )
+        )
+        untracked = _parse_nul_paths(
+            self._run(
+                worktree.path,
+                "ls-files",
+                "--others",
+                "--exclude-standard",
+                "-z",
+                include_trailing=True,
+            )
+        )
+        return tuple(sorted(set((*tracked, *staged, *untracked))))
+
+    def recover_candidate(
+        self,
+        worktree: Worktree,
+        *,
+        expected_message: str,
+    ) -> CandidateCommit | None:
+        if not expected_message.strip():
+            raise ValueError("expected candidate message must be non-empty")
+        if self.changed_paths(worktree):
+            return None
+
+        head = self._run(worktree.path, "rev-parse", "HEAD")
+        if head == worktree.base_commit:
+            return None
+        count = self._run(
+            worktree.path,
+            "rev-list",
+            "--count",
+            f"{worktree.base_commit}..{head}",
+        )
+        if count != "1":
+            raise GitRepositoryError(
+                "candidate branch advanced by an unexpected number of commits"
+            )
+        subject = self._run(worktree.path, "log", "-1", "--format=%s")
+        if subject != expected_message:
+            raise GitRepositoryError(
+                "candidate branch contains an unexpected commit message"
+            )
+        thread_id = self._run(
+            worktree.path,
+            "log",
+            "-1",
+            "--format=%(trailers:key=Autodev-Codex-Thread,valueonly)",
+        )
+        if not thread_id:
+            raise GitRepositoryError(
+                "candidate commit is missing the durable Codex thread trailer"
+            )
+        tree = self._run(worktree.path, "rev-parse", "HEAD^{tree}")
+        changed_paths = _parse_nul_paths(
+            self._run(
+                worktree.path,
+                "diff",
+                "--name-only",
+                "--no-renames",
+                "-z",
+                worktree.base_commit,
+                head,
+                include_trailing=True,
+            )
+        )
+        if not changed_paths:
+            raise GitRepositoryError("candidate commit has no changed paths")
+        return CandidateCommit(
+            commit=head,
+            tree=tree,
+            changed_paths=changed_paths,
+            codex_thread_id=thread_id,
+        )
 
     def commit_candidate(
         self,
         worktree: Worktree,
         *,
         message: str,
+        codex_thread_id: str,
     ) -> CandidateCommit:
         if not message.strip():
             raise ValueError("commit message must be non-empty")
+        if not codex_thread_id.strip():
+            raise ValueError("Codex thread id must be non-empty")
+
+        existing = self.recover_candidate(
+            worktree,
+            expected_message=message,
+        )
+        if existing is not None:
+            if existing.codex_thread_id != codex_thread_id:
+                raise GitRepositoryError(
+                    "candidate commit Codex thread differs from replayed thread"
+                )
+            return existing
+
         changed = self.changed_paths(worktree)
         if not changed:
             raise GitRepositoryError("candidate has no changed files")
@@ -102,10 +228,18 @@ class GitCliRepository(RepositoryProvider):
             "commit",
             "-m",
             message,
+            "-m",
+            f"Autodev-Codex-Thread: {codex_thread_id}",
         )
-        commit = self._run(worktree.path, "rev-parse", "HEAD")
-        tree = self._run(worktree.path, "rev-parse", "HEAD^{tree}")
-        return CandidateCommit(commit=commit, tree=tree, changed_paths=changed)
+        committed = self.recover_candidate(
+            worktree,
+            expected_message=message,
+        )
+        if committed is None:
+            raise GitRepositoryError("candidate commit could not be reconciled after commit")
+        if committed.codex_thread_id != codex_thread_id:
+            raise GitRepositoryError("candidate commit persisted the wrong Codex thread")
+        return committed
 
     def remove_worktree(
         self,
@@ -119,6 +253,43 @@ class GitCliRepository(RepositoryProvider):
             "--force",
             str(worktree.path),
         )
+
+    def _validate_existing_worktree(
+        self,
+        path: Path,
+        expected_branch: str,
+        base_commit: str,
+    ) -> None:
+        top = Path(self._run(path, "rev-parse", "--show-toplevel")).resolve()
+        if top != path:
+            raise GitRepositoryError(
+                f"existing worktree root mismatch: expected {path}, got {top}"
+            )
+        branch = self._run(path, "branch", "--show-current")
+        if branch != expected_branch:
+            raise GitRepositoryError(
+                f"existing worktree branch mismatch: expected {expected_branch}, got {branch}"
+            )
+        merge_base = self._run(path, "merge-base", base_commit, "HEAD")
+        if merge_base != base_commit:
+            raise GitRepositoryError(
+                "existing worktree is not descended from the requested baseline"
+            )
+
+    def _returncode(self, cwd: Path, *args: str) -> int:
+        try:
+            result = subprocess.run(
+                [self._git, *args],
+                cwd=cwd,
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=self._timeout_seconds,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise GitRepositoryError(f"git command failed to execute: {args!r}") from exc
+        return result.returncode
 
     def _run(
         self,
@@ -152,25 +323,10 @@ def _safe_cycle_id(cycle_id: str) -> str:
     return cycle_id
 
 
-def _parse_porcelain_paths(output: str) -> tuple[str, ...]:
-    fields = output.split("\0")
-    paths: list[str] = []
-    index = 0
-    while index < len(fields):
-        entry = fields[index]
-        index += 1
-        if not entry:
-            continue
-        if len(entry) < 4:
-            raise GitRepositoryError("malformed git status porcelain entry")
-        status = entry[:2]
-        path = entry[3:]
-        if "R" in status or "C" in status:
-            if index >= len(fields) or not fields[index]:
-                raise GitRepositoryError("rename/copy status is missing destination path")
-            path = fields[index]
-            index += 1
-        normalized = path.replace("\\", "/")
-        if normalized not in paths:
-            paths.append(normalized)
+def _parse_nul_paths(output: str) -> tuple[str, ...]:
+    paths = {
+        item.replace("\\", "/")
+        for item in output.split("\0")
+        if item
+    }
     return tuple(sorted(paths))
