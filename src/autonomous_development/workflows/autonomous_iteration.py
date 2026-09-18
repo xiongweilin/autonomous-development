@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+
 from dbos import DBOS, DBOSConfiguredInstance
 
 from autonomous_development.application.build import BuildService
@@ -449,7 +450,7 @@ class AutonomousIterationWorkflow(DBOSConfiguredInstance):
         full = VerificationRun(
             id=f"{cycle_id}-verify-full",
             candidate_id=candidate.id,
-            checks=pre.checks + (performance_check,),
+            checks=(*pre.checks, performance_check),
         )
         return _verification_to_document(full)
 
