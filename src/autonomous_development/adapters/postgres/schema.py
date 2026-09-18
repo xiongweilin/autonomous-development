@@ -55,7 +55,8 @@ experiments = Table(
 experiment_stage_operations = Table(
     "canary_stage_operations",
     metadata,
-    Column("operation_id", String(192), primary_key=True),
+    Column("sequence_id", Integer, primary_key=True, autoincrement=True),
+    Column("operation_id", String(192), nullable=False, unique=True),
     Column("experiment_id", String(128), nullable=False, index=True),
     Column("stage_index", Integer, nullable=False),
     Column("result_stage_index", Integer, nullable=False),
