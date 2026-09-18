@@ -42,6 +42,13 @@ class DeploymentState(StrEnum):
     FAILED = "failed"
 
 
+class CanaryDecisionKind(StrEnum):
+    ADVANCE = "advance"
+    HOLD = "hold"
+    ROLLBACK = "rollback"
+    PROMOTION_READY = "promotion-ready"
+
+
 class ReleaseDecisionKind(StrEnum):
     PROMOTE = "promote"
     REJECT = "reject"

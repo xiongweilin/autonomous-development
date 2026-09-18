@@ -2,10 +2,11 @@ from datetime import UTC, datetime
 
 from autonomous_development.application.deployment import DeploymentService
 from autonomous_development.domain.enums import DeploymentState
-from autonomous_development.domain.models import BuildArtifact, Deployment
+from autonomous_development.domain.models import BuildArtifact, CanaryStage, Deployment
 from autonomous_development.ports.deployment import DeploymentRuntime, DeploymentSpec
 from autonomous_development.ports.target_contract import (
     TargetBuildContract,
+    TargetCanaryContract,
     TargetContract,
     TargetDeploymentContract,
     TargetPerformanceContract,
@@ -75,6 +76,13 @@ def test_deployment_service_uses_artifact_digest_and_contract() -> None:
             "tests/performance/smoke.js",
             ("http_req_failed",),
             60,
+        ),
+        canary=TargetCanaryContract(
+            stages=(CanaryStage(100, 60, 100),),
+            max_candidate_error_rate=0.02,
+            max_error_rate_delta=0.01,
+            max_candidate_p95_latency_ms=250.0,
+            max_p95_latency_ratio=1.25,
         ),
     )
     provider = FakeProvider()

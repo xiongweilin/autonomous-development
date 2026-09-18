@@ -2,13 +2,21 @@ from datetime import UTC, datetime
 
 import pytest
 
+from autonomous_development.domain.canary import (
+    CanaryGuardrails,
+    CanaryStageDecision,
+    CanaryStageEvidence,
+    evaluate_canary_stage,
+)
 from autonomous_development.domain.enums import (
     CycleState,
     ReleaseDecisionKind,
     VerificationStatus,
 )
 from autonomous_development.domain.models import (
+    CanaryStage,
     DevelopmentCycle,
+    Experiment,
     VerificationCheck,
     VerificationRun,
 )
@@ -92,52 +100,100 @@ def promotion_ready_cycle() -> DevelopmentCycle:
     )
 
 
+def experiment() -> Experiment:
+    return Experiment(
+        id="experiment-1",
+        target_id="target-1",
+        control_release_id="release-1",
+        candidate_deployment_id="deployment-1",
+        stages=(
+            CanaryStage(10, 60, 100),
+            CanaryStage(100, 120, 200),
+        ),
+    )
+
+
+def canary_history() -> tuple[CanaryStageDecision, ...]:
+    guardrails = CanaryGuardrails(0.02, 0.01, 250.0, 1.25)
+    first = evaluate_canary_stage(
+        experiment(),
+        CanaryStageEvidence(
+            experiment_id="experiment-1",
+            stage_index=0,
+            weight_percent=10,
+            observed_duration_seconds=60,
+            total_requests=100,
+            candidate_requests=10,
+            control_requests=90,
+            candidate_error_rate=0.005,
+            control_error_rate=0.004,
+            candidate_p95_latency_ms=110,
+            control_p95_latency_ms=100,
+            evidence_refs=("canary:stage-0",),
+        ),
+        guardrails,
+    )
+    final_experiment = Experiment(
+        id="experiment-1",
+        target_id="target-1",
+        control_release_id="release-1",
+        candidate_deployment_id="deployment-1",
+        stages=experiment().stages,
+        current_stage_index=1,
+    )
+    final = evaluate_canary_stage(
+        final_experiment,
+        CanaryStageEvidence(
+            experiment_id="experiment-1",
+            stage_index=1,
+            weight_percent=100,
+            observed_duration_seconds=120,
+            total_requests=200,
+            candidate_requests=200,
+            control_requests=0,
+            candidate_error_rate=0.005,
+            control_error_rate=None,
+            candidate_p95_latency_ms=110,
+            control_p95_latency_ms=None,
+            evidence_refs=("canary:stage-1",),
+        ),
+        guardrails,
+    )
+    return (first, final)
+
+
 def test_promotion_requires_all_mandatory_gates() -> None:
     decision = decide_promotion(
         promotion_ready_cycle(),
         verification(),
+        experiment(),
+        canary_history(),
         mandatory_gates=frozenset({"static", "tests", "security"}),
-        canary_evidence_sufficient=True,
-        hard_regression=False,
-        evidence_refs=("canary:1",),
     )
     assert decision.kind is ReleaseDecisionKind.REJECT
 
 
-def test_insufficient_evidence_holds_instead_of_promotes() -> None:
+def test_incomplete_canary_history_blocks_promotion() -> None:
     decision = decide_promotion(
         promotion_ready_cycle(),
         verification(),
+        experiment(),
+        canary_history()[:1],
         mandatory_gates=frozenset({"static", "tests"}),
-        canary_evidence_sufficient=False,
-        hard_regression=False,
-        evidence_refs=("canary:1",),
-    )
-    assert decision.kind is ReleaseDecisionKind.HOLD_INSUFFICIENT_EVIDENCE
-
-
-def test_hard_regression_rolls_back() -> None:
-    decision = decide_promotion(
-        promotion_ready_cycle(),
-        verification(),
-        mandatory_gates=frozenset({"static", "tests"}),
-        canary_evidence_sufficient=True,
-        hard_regression=True,
-        evidence_refs=("canary:1",),
-    )
-    assert decision.kind is ReleaseDecisionKind.ROLLBACK
-
-
-def test_promotion_requires_reconstructable_evidence() -> None:
-    decision = decide_promotion(
-        promotion_ready_cycle(),
-        verification(),
-        mandatory_gates=frozenset({"static", "tests"}),
-        canary_evidence_sufficient=True,
-        hard_regression=False,
-        evidence_refs=(),
     )
     assert decision.kind is ReleaseDecisionKind.BLOCKED
+
+
+def test_complete_canary_history_promotes() -> None:
+    decision = decide_promotion(
+        promotion_ready_cycle(),
+        verification(),
+        experiment(),
+        canary_history(),
+        mandatory_gates=frozenset({"static", "tests"}),
+    )
+    assert decision.kind is ReleaseDecisionKind.PROMOTE
+    assert decision.evidence_refs == ("canary:stage-0", "canary:stage-1")
 
 
 def test_promoted_transition_requires_explicit_promote_decision() -> None:
