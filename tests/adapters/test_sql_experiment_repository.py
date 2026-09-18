@@ -1,6 +1,5 @@
-from sqlalchemy import create_engine
-
 import pytest
+from sqlalchemy import create_engine
 
 from autonomous_development.adapters.postgres.experiments import SqlExperimentRepository
 from autonomous_development.adapters.postgres.schema import metadata
