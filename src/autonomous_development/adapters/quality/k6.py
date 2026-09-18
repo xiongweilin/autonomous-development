@@ -6,6 +6,7 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from autonomous_development.domain.enums import VerificationStatus
 from autonomous_development.domain.models import CandidateRevision, VerificationCheck
@@ -32,6 +33,7 @@ class K6PerformanceGate:
     ) -> None:
         if not required_threshold_metrics:
             raise ValueError("k6 gate requires threshold metrics")
+        _require_loopback(base_url)
         self._runner = runner
         self._evidence = evidence
         self._base_url = base_url
@@ -148,3 +150,9 @@ def _missing_thresholds(
 
 def _digest(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _require_loopback(base_url: str) -> None:
+    parsed = urlsplit(base_url)
+    if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        raise ValueError("V1 performance gate is restricted to local HTTP loopback")
