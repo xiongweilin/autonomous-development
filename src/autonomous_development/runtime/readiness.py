@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import shutil
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
@@ -11,22 +10,10 @@ from sqlalchemy import Engine, text
 from autonomous_development.application.release_catalog import ReleaseCatalogService
 from autonomous_development.application.target_registry import TargetRegistryService
 from autonomous_development.ports.process import CommandRequest, ProcessRunner
+from autonomous_development.ports.readiness import ReadinessCheck, ReadinessReport
 from autonomous_development.ports.target_contract import TargetContractLoader
 
 from .config import RuntimeSettings
-
-
-@dataclass(frozen=True, slots=True)
-class ReadinessCheck:
-    name: str
-    ready: bool
-    detail: str
-
-
-@dataclass(frozen=True, slots=True)
-class ReadinessReport:
-    ready: bool
-    checks: tuple[ReadinessCheck, ...]
 
 
 class RuntimeReadinessService:
