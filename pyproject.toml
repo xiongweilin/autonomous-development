@@ -46,6 +46,7 @@ packages = ["src/autonomous_development"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = ["integration: requires external services such as PostgreSQL"]
 
 [tool.ruff]
 line-length = 100
