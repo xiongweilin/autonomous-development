@@ -5,9 +5,9 @@ from typing import Any
 
 from dbos import DBOS, DBOSConfiguredInstance
 
-from autonomous_development.application.feedback_controller import (
-    FeedbackIterationController,
-    FeedbackIterationPlan,
+from autonomous_development.application.iteration_scheduler import (
+    FeedbackIterationResult,
+    FeedbackIterationSchedulerService,
 )
 
 from .autonomous_iteration import AutonomousIterationWorkflow
@@ -18,56 +18,59 @@ from .post_promotion_soak import PostPromotionSoakWorkflow
 class FeedbackAutonomyWorkflow(DBOSConfiguredInstance):
     def __init__(
         self,
-        controller: FeedbackIterationController,
+        scheduler: FeedbackIterationSchedulerService,
         execution: AutonomousIterationWorkflow,
         soak: PostPromotionSoakWorkflow,
         *,
         config_name: str = "feedback-autonomy-v1",
     ) -> None:
-        self._controller = controller
+        self._scheduler = scheduler
         self._execution = execution
         self._soak = soak
         super().__init__(config_name=config_name)
 
     @DBOS.workflow(max_recovery_attempts=20)
     def run(self, target_id: str, scheduled_time_iso: str) -> dict[str, object]:
-        plan_doc = self._prepare_step(target_id, scheduled_time_iso)
-        if plan_doc is None:
-            return {"status": "idle", "target_id": target_id}
-
-        plan = _plan_from_document(plan_doc)
-        if not plan.executable:
-            return {
-                "status": "blocked",
+        result_doc = self._prepare_step(target_id, scheduled_time_iso)
+        result = _result_from_document(result_doc)
+        if not result.prepared:
+            response: dict[str, object] = {
+                "status": result.status,
                 "target_id": target_id,
-                "cycle_id": plan.cycle_id,
-                "reason": plan.reason,
             }
-        if plan.proposal_id is None:
-            raise RuntimeError("executable feedback plan has no proposal id")
+            if result.feedback_id is not None:
+                response["feedback_id"] = result.feedback_id
+            if result.cycle_id is not None:
+                response["cycle_id"] = result.cycle_id
+            if result.reason is not None:
+                response["reason"] = result.reason
+            return response
+
+        if result.cycle_id is None or result.proposal_id is None:
+            raise RuntimeError("prepared feedback iteration is missing cycle or proposal identity")
 
         execution = self._execution.run(
-            plan.cycle_id,
-            plan.proposal_id,
-            f"{plan.cycle_id}:execution",
+            result.cycle_id,
+            result.proposal_id,
+            f"{result.cycle_id}:execution",
         )
         status = _string(execution, "status")
         if status != "promoted":
             return {
                 "status": status,
                 "target_id": target_id,
-                "cycle_id": plan.cycle_id,
+                "cycle_id": result.cycle_id,
                 "execution": execution,
             }
 
         soak = self._soak.run(
-            plan.cycle_id,
-            f"{plan.cycle_id}:soak",
+            result.cycle_id,
+            f"{result.cycle_id}:soak",
         )
         return {
             "status": _string(soak, "status"),
             "target_id": target_id,
-            "cycle_id": plan.cycle_id,
+            "cycle_id": result.cycle_id,
             "execution": execution,
             "soak": soak,
         }
@@ -82,13 +85,13 @@ class FeedbackAutonomyWorkflow(DBOSConfiguredInstance):
         self,
         target_id: str,
         scheduled_time_iso: str,
-    ) -> dict[str, object] | None:
+    ) -> dict[str, object]:
         scheduled_time = datetime.fromisoformat(scheduled_time_iso)
-        plan = self._controller.prepare_next(
+        result = self._scheduler.prepare_next(
             target_id,
-            closed_at=scheduled_time,
+            scheduled_time=scheduled_time,
         )
-        return _plan_document(plan) if plan is not None else None
+        return _result_document(result)
 
 
 _SCHEDULED_WORKFLOW: FeedbackAutonomyWorkflow | None = None
@@ -114,36 +117,34 @@ def scheduled_feedback_tick(
     return workflow.run(context, scheduled_time.isoformat())
 
 
-def _plan_document(plan: FeedbackIterationPlan) -> dict[str, object]:
+def _result_document(result: FeedbackIterationResult) -> dict[str, object]:
     return {
-        "target_id": plan.target_id,
-        "feedback_id": plan.feedback_id,
-        "release_id": plan.release_id,
-        "evidence_window_id": plan.evidence_window_id,
-        "cycle_id": plan.cycle_id,
-        "proposal_id": plan.proposal_id,
-        "executable": plan.executable,
-        "reason": plan.reason,
+        "status": result.status,
+        "target_id": result.target_id,
+        "feedback_id": result.feedback_id,
+        "cycle_id": result.cycle_id,
+        "proposal_id": result.proposal_id,
+        "reason": result.reason,
     }
 
 
-def _plan_from_document(document: dict[str, object]) -> FeedbackIterationPlan:
-    proposal = document.get("proposal_id")
-    if proposal is not None and not isinstance(proposal, str):
-        raise ValueError("feedback plan proposal id must be a string or null")
-    executable = document.get("executable")
-    if not isinstance(executable, bool):
-        raise ValueError("feedback plan executable must be boolean")
-    return FeedbackIterationPlan(
+def _result_from_document(document: dict[str, object]) -> FeedbackIterationResult:
+    return FeedbackIterationResult(
+        status=_string(document, "status"),
         target_id=_string(document, "target_id"),
-        feedback_id=_string(document, "feedback_id"),
-        release_id=_string(document, "release_id"),
-        evidence_window_id=_string(document, "evidence_window_id"),
-        cycle_id=_string(document, "cycle_id"),
-        proposal_id=proposal,
-        executable=executable,
-        reason=_string(document, "reason"),
+        feedback_id=_optional_string(document.get("feedback_id")),
+        cycle_id=_optional_string(document.get("cycle_id")),
+        proposal_id=_optional_string(document.get("proposal_id")),
+        reason=_optional_string(document.get("reason")),
     )
+
+
+def _optional_string(value: object) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("optional feedback iteration field must be a string or null")
+    return value
 
 
 def _string(document: dict[str, object], key: str) -> str:
