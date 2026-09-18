@@ -58,7 +58,9 @@ def test_build_artifact_binds_source_definition_locks_and_scan(tmp_path: Path) -
     assert artifact.source_tree_hash == "c" * 40
     assert artifact.build_definition_digest.startswith("sha256:")
     assert artifact.dependency_lock_digest.startswith("sha256:")
+    assert artifact.build_evidence_ref == "build:evidence"
     assert artifact.sbom_digest == "sha256:" + "2" * 64
+    assert artifact.sbom_ref == "sbom:candidate-build"
     assert artifact.vulnerability_scan_ref == "scan:candidate-build"
 
 
