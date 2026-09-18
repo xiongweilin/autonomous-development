@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TypedDict
 
 from autonomous_development.domain.enums import VerificationStatus
 from autonomous_development.domain.models import CandidateRevision, VerificationCheck
@@ -13,6 +14,11 @@ from autonomous_development.ports.codex import (
     CodexTurnRequest,
 )
 from autonomous_development.ports.evidence import EvidenceStore
+
+class ReviewResult(TypedDict):
+    summary: str
+    blocking_findings: list[str]
+
 
 _REVIEW_SCHEMA: dict[str, object] = {
     "type": "object",
@@ -104,7 +110,7 @@ class CodexReviewGate:
         )
 
 
-def _parse_review(messages: tuple[str, ...]) -> dict[str, object]:
+def _parse_review(messages: tuple[str, ...]) -> ReviewResult:
     if not messages:
         raise ValueError("Codex review produced no agent message")
     parsed = json.loads(messages[-1])
