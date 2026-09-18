@@ -406,6 +406,9 @@ class DevelopmentCycle:
     baseline_release_id: str
     state: CycleState = CycleState.NEW
     version: int = 0
+    evidence_window_id: str | None = None
+    diagnosis_id: str | None = None
+    change_proposal_id: str | None = None
     candidate_id: str | None = None
     verification_run_id: str | None = None
     artifact_id: str | None = None

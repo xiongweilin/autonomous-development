@@ -7,7 +7,9 @@ from typing import Protocol
 from autonomous_development.domain.canary import CanaryStageDecision
 from autonomous_development.domain.enums import CanaryDecisionKind, CycleState
 from autonomous_development.domain.models import (
+    ChangeProposal,
     DevelopmentCycle,
+    Diagnosis,
     EvidenceWindow,
     Experiment,
     ReleaseDecision,
@@ -152,3 +154,16 @@ class EvidenceWindowRepository(Protocol):
     def add(self, window: EvidenceWindow) -> EvidenceWindow: ...
 
     def get(self, window_id: str) -> EvidenceWindow | None: ...
+
+
+
+class DiagnosisRepository(Protocol):
+    def add(self, diagnosis: Diagnosis) -> Diagnosis: ...
+
+    def get(self, diagnosis_id: str) -> Diagnosis | None: ...
+
+
+class ChangeProposalRepository(Protocol):
+    def add(self, proposal: ChangeProposal) -> ChangeProposal: ...
+
+    def get(self, proposal_id: str) -> ChangeProposal | None: ...
