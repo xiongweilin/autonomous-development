@@ -1,0 +1,102 @@
+[project]
+name = "autonomous-development"
+version = "0.1.0"
+description = "Local-first autonomous software development and product-evolution control plane"
+readme = "README.md"
+requires-python = ">=3.12,<3.15"
+license = { text = "MIT" }
+authors = [{ name = "xiongweilin" }]
+dependencies = [
+  "alembic>=1.13,<2",
+  "dbos>=2.31,<3",
+  "fastapi>=0.115,<1",
+  "httpx>=0.27,<1",
+  "opentelemetry-api>=1.30,<2",
+  "opentelemetry-exporter-otlp-proto-http>=1.30,<2",
+  "opentelemetry-instrumentation-fastapi>=0.51b0,<1",
+  "opentelemetry-instrumentation-httpx>=0.51b0,<1",
+  "opentelemetry-sdk>=1.30,<2",
+  "prometheus-client>=0.20,<1",
+  "psycopg[binary]>=3.2,<4",
+  "pydantic>=2.9,<3",
+  "pydantic-settings>=2.5,<3",
+  "sqlalchemy>=2.0.35,<3",
+  "structlog>=24.4,<26",
+  "uvicorn[standard]>=0.30,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "hypothesis>=6.112,<7",
+  "import-linter>=2.1,<3",
+  "mypy>=1.13,<2",
+  "pytest>=8.3,<9",
+  "pytest-asyncio>=0.24,<1",
+  "pytest-cov>=6,<7",
+  "ruff>=0.8,<1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/autonomous_development"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["autonomous_development"]
+
+[tool.importlinter]
+root_packages = ["autonomous_development"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "domain is infrastructure-free"
+type = "forbidden"
+source_modules = ["autonomous_development.domain"]
+forbidden_modules = [
+  "autonomous_development.application",
+  "autonomous_development.ports",
+  "autonomous_development.adapters",
+  "autonomous_development.workflows",
+  "autonomous_development.api",
+  "autonomous_development.cli",
+  "autonomous_development.runtime",
+]
+
+[[tool.importlinter.contracts]]
+name = "ports do not depend on implementations"
+type = "forbidden"
+source_modules = ["autonomous_development.ports"]
+forbidden_modules = [
+  "autonomous_development.application",
+  "autonomous_development.adapters",
+  "autonomous_development.workflows",
+  "autonomous_development.api",
+  "autonomous_development.cli",
+  "autonomous_development.runtime",
+]
+
+[[tool.importlinter.contracts]]
+name = "application does not depend on adapters or entrypoints"
+type = "forbidden"
+source_modules = ["autonomous_development.application"]
+forbidden_modules = [
+  "autonomous_development.adapters",
+  "autonomous_development.api",
+  "autonomous_development.cli",
+  "autonomous_development.runtime",
+]
