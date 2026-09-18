@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Mapping
+from collections.abc import Mapping
 
 from .enums import (
     CycleState,
