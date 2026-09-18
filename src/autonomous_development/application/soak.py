@@ -2,10 +2,7 @@ from __future__ import annotations
 
 from autonomous_development.application.cycles import CycleService
 from autonomous_development.application.release_catalog import ReleaseCatalogService
-from autonomous_development.domain.canary import (
-    CanaryGuardrails,
-    CanaryStageEvidence,
-)
+from autonomous_development.domain.canary import CanaryGuardrails
 from autonomous_development.domain.enums import (
     CycleState,
     ReleaseDecisionKind,
