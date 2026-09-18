@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 
+import pytest
 from sqlalchemy import create_engine
 
 from autonomous_development.adapters.postgres.cycles import SqlCycleRepository
@@ -251,8 +252,6 @@ def test_unrecorded_rollback_cannot_change_cycle() -> None:
         violated_guardrails=("candidate_error_rate",),
         reason="unrecorded regression",
     )
-
-    import pytest
 
     with pytest.raises(ValueError, match="durable"):
         releases.apply_canary_decision(
