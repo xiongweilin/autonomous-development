@@ -202,3 +202,37 @@ soak_decision_operations = Table(
     Column("violated_guardrails_json", JSON, nullable=False),
     Column("reason", String(512), nullable=False),
 )
+
+
+development_targets = Table(
+    "development_targets",
+    metadata,
+    Column("id", String(128), primary_key=True),
+    Column("repository", String(1024), nullable=False),
+    Column("default_branch", String(256), nullable=False),
+    Column("target_contract_revision", String(128), nullable=False),
+    Column("active_objective_revision_id", String(128), nullable=False, index=True),
+    Column("allowed_paths_json", JSON, nullable=False),
+    Column("forbidden_paths_json", JSON, nullable=False),
+    Column("max_changed_files", Integer, nullable=False),
+    Column("max_implementation_attempts", Integer, nullable=False),
+    Column("current_release_id", String(128)),
+)
+
+product_objective_revisions = Table(
+    "product_objective_revisions",
+    metadata,
+    Column("id", String(128), primary_key=True),
+    Column("target_id", String(128), nullable=False, index=True),
+    Column("statement", String(4000), nullable=False),
+    Column("acceptance_criteria_json", JSON, nullable=False),
+    Column("primary_metrics_json", JSON, nullable=False),
+    Column("reliability_constraints_json", JSON, nullable=False),
+    Column("performance_constraints_json", JSON, nullable=False),
+    Column("security_constraints_json", JSON, nullable=False),
+    Column("allowed_paths_json", JSON, nullable=False),
+    Column("forbidden_paths_json", JSON, nullable=False),
+    Column("max_changed_files", Integer, nullable=False),
+    Column("max_implementation_attempts", Integer, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
