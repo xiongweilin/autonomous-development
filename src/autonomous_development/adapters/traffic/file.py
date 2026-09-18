@@ -223,7 +223,7 @@ def _snapshot_from_document(document: dict[str, Any]) -> TrafficRouteSnapshot:
 
 
 def _acquire_file_lock(handle: Any) -> None:
-    if os.name == "nt":
+    if os.name == "nt":  # pragma: no cover - exercised on Windows
         module = importlib.import_module("msvcrt")
         handle.seek(0, os.SEEK_END)
         if handle.tell() == 0:
@@ -245,7 +245,7 @@ def _acquire_file_lock(handle: Any) -> None:
 
 
 def _release_file_lock(handle: Any) -> None:
-    if os.name == "nt":
+    if os.name == "nt":  # pragma: no cover - exercised on Windows
         module = importlib.import_module("msvcrt")
         handle.seek(0)
         module.locking(handle.fileno(), module.LK_UNLCK, 1)
