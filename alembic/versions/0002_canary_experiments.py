@@ -54,9 +54,30 @@ def upgrade() -> None:
         ["experiment_id"],
         unique=False,
     )
+    op.create_table(
+        "release_decision_operations",
+        sa.Column("operation_id", sa.String(length=192), nullable=False),
+        sa.Column("cycle_id", sa.String(length=128), nullable=False),
+        sa.Column("decision_kind", sa.String(length=64), nullable=False),
+        sa.Column("gate_refs_json", sa.JSON(), nullable=False),
+        sa.Column("evidence_refs_json", sa.JSON(), nullable=False),
+        sa.Column("reason", sa.String(length=512), nullable=False),
+        sa.PrimaryKeyConstraint("operation_id"),
+    )
+    op.create_index(
+        "ix_release_decision_operations_cycle_id",
+        "release_decision_operations",
+        ["cycle_id"],
+        unique=False,
+    )
 
 
 def downgrade() -> None:
+    op.drop_index(
+        "ix_release_decision_operations_cycle_id",
+        table_name="release_decision_operations",
+    )
+    op.drop_table("release_decision_operations")
     op.drop_index(
         "ix_canary_stage_operations_experiment_id",
         table_name="canary_stage_operations",
