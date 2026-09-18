@@ -91,5 +91,10 @@ jobs:
           uv run alembic upgrade head
           uv run alembic downgrade base
           uv run alembic upgrade head
-      - name: PostgreSQL durability
+      - name: Locate PostgreSQL service container
+        run: |
+          container_id="$(docker ps --filter 'ancestor=postgres:17-alpine' --format '{{.ID}}' | head -n 1)"
+          test -n "$container_id"
+          echo "AUTODEV_POSTGRES_CONTAINER=$container_id" >> "$GITHUB_ENV"
+      - name: PostgreSQL durability and backup restore
         run: uv run pytest -m integration tests/integration
