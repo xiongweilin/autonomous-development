@@ -2,8 +2,16 @@ from datetime import UTC, datetime
 
 import pytest
 
-from autonomous_development.domain.enums import CycleState, ReleaseDecisionKind, VerificationStatus
-from autonomous_development.domain.models import DevelopmentCycle, VerificationCheck, VerificationRun
+from autonomous_development.domain.enums import (
+    CycleState,
+    ReleaseDecisionKind,
+    VerificationStatus,
+)
+from autonomous_development.domain.models import (
+    DevelopmentCycle,
+    VerificationCheck,
+    VerificationRun,
+)
 from autonomous_development.domain.transitions import (
     StaleCycleError,
     TransitionError,
