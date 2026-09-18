@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import queue
 import subprocess
 import threading
@@ -23,6 +25,7 @@ class CodexAppServer(CodexProvider):
     """Run one bounded Codex turn per app-server process.
 
     Codex thread identity is durable; app-server process identity deliberately is not.
+    A local journal can bind a stable orchestration resume key to the Codex thread id.
     """
 
     def __init__(
@@ -31,12 +34,16 @@ class CodexAppServer(CodexProvider):
         command: Sequence[str] = ("codex", "app-server"),
         client_name: str = "autonomous_development",
         client_version: str = "0.1.0",
+        thread_journal_root: Path | None = None,
     ) -> None:
         if not command:
             raise ValueError("Codex app-server command must be non-empty")
+        if thread_journal_root is not None and not thread_journal_root.is_absolute():
+            raise ValueError("Codex thread journal root must be absolute")
         self._command = tuple(command)
         self._client_name = client_name
         self._client_version = client_version
+        self._thread_journal_root = thread_journal_root
 
     def run_turn(self, request: CodexTurnRequest) -> CodexTurnResult:
         process = subprocess.Popen(
@@ -81,13 +88,14 @@ class CodexAppServer(CodexProvider):
             self._response(messages, expected_id=1, deadline=deadline, events=events)
             self._send(process.stdin, {"method": "initialized", "params": {}})
 
-            method = "thread/resume" if request.thread_id else "thread/start"
+            requested_thread_id = self._resolve_thread_id(request)
+            method = "thread/resume" if requested_thread_id else "thread/start"
             params: dict[str, object] = {}
-            if request.thread_id:
-                params["threadId"] = request.thread_id
+            if requested_thread_id:
+                params["threadId"] = requested_thread_id
             if request.model:
                 params["model"] = request.model
-            if not request.thread_id:
+            if not requested_thread_id:
                 params.update(
                     {
                         "cwd": str(request.cwd),
@@ -105,6 +113,11 @@ class CodexAppServer(CodexProvider):
             )
             thread = _mapping(thread_response.get("thread"), "thread")
             thread_id = _string(thread.get("id"), "thread.id")
+            if requested_thread_id is not None and thread_id != requested_thread_id:
+                raise CodexProviderError(
+                    "Codex resumed a different thread than the durable thread identity"
+                )
+            self._record_thread(request.resume_key, thread_id)
 
             turn_params: dict[str, object] = {
                 "threadId": thread_id,
@@ -149,6 +162,57 @@ class CodexAppServer(CodexProvider):
         finally:
             _terminate(process)
             reader.join(timeout=1)
+
+    def _resolve_thread_id(self, request: CodexTurnRequest) -> str | None:
+        journaled = self._load_thread(request.resume_key)
+        if request.thread_id is not None and journaled is not None:
+            if request.thread_id != journaled:
+                raise CodexProviderError(
+                    "explicit Codex thread id conflicts with durable thread journal"
+                )
+        return request.thread_id or journaled
+
+    def _load_thread(self, resume_key: str | None) -> str | None:
+        path = self._journal_path(resume_key)
+        if path is None or not path.exists():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise CodexProviderError("Codex thread journal is unreadable") from exc
+        if not isinstance(payload, dict):
+            raise CodexProviderError("Codex thread journal is malformed")
+        return _string(payload.get("thread_id"), "thread journal thread_id")
+
+    def _record_thread(self, resume_key: str | None, thread_id: str) -> None:
+        path = self._journal_path(resume_key)
+        if path is None:
+            return
+        existing = self._load_thread(resume_key)
+        if existing is not None:
+            if existing != thread_id:
+                raise CodexProviderError(
+                    "Codex resume key is already bound to a different thread"
+                )
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        try:
+            temporary.write_text(
+                json.dumps({"thread_id": thread_id}, separators=(",", ":")),
+                encoding="utf-8",
+            )
+            temporary.replace(path)
+        except OSError as exc:
+            raise CodexProviderError("Codex thread journal could not be persisted") from exc
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def _journal_path(self, resume_key: str | None) -> Path | None:
+        if resume_key is None or self._thread_journal_root is None:
+            return None
+        digest = hashlib.sha256(resume_key.encode("utf-8")).hexdigest()
+        return self._thread_journal_root / f"{digest}.json"
 
     def _await_completion(
         self,

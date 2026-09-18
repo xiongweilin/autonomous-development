@@ -11,7 +11,11 @@ from autonomous_development.ports.codex import (
     CodexSandbox,
     CodexTurnRequest,
 )
-from autonomous_development.ports.repository import RepositoryProvider, Worktree
+from autonomous_development.ports.repository import (
+    CandidateCommit,
+    RepositoryProvider,
+    Worktree,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +59,20 @@ class EngineeringService:
             cycle_id=cycle_id,
             worktree_root=worktree_root,
         )
+        commit_message = f"autodev: implement {proposal.id}"
+
+        recovered = self._repository.recover_candidate(
+            worktree,
+            expected_message=commit_message,
+        )
+        if recovered is not None:
+            return self._recovered_attempt(
+                proposal,
+                cycle_id=cycle_id,
+                attempt=attempt,
+                worktree=worktree,
+                committed=recovered,
+            )
 
         result = self._codex.run_turn(
             CodexTurnRequest(
@@ -62,6 +80,7 @@ class EngineeringService:
                 cwd=worktree.path,
                 sandbox=CodexSandbox.WORKSPACE_WRITE,
                 thread_id=thread_id,
+                resume_key=f"{cycle_id}:implementation:{attempt}",
                 model=model,
             )
         )
@@ -72,25 +91,65 @@ class EngineeringService:
         validate_changed_paths(proposal, changed_paths)
         committed = self._repository.commit_candidate(
             worktree,
-            message=f"autodev: implement {proposal.id}",
-        )
-        candidate = CandidateRevision(
-            id=f"{cycle_id}-candidate-{attempt}",
-            cycle_id=cycle_id,
-            worktree_path=str(worktree.path),
-            branch_name=worktree.branch,
-            base_commit=worktree.base_commit,
-            candidate_commit=committed.commit,
-            tree_hash=committed.tree,
-            changed_paths=committed.changed_paths,
+            message=commit_message,
             codex_thread_id=result.thread_id,
-            implementation_attempt=attempt,
         )
         return EngineeringAttempt(
-            candidate=candidate,
+            candidate=_candidate(
+                cycle_id,
+                attempt,
+                worktree,
+                committed,
+                result.thread_id,
+            ),
             worktree=worktree,
             codex_status=result.status,
         )
+
+    def _recovered_attempt(
+        self,
+        proposal: ChangeProposal,
+        *,
+        cycle_id: str,
+        attempt: int,
+        worktree: Worktree,
+        committed: CandidateCommit,
+    ) -> EngineeringAttempt:
+        if committed.codex_thread_id is None:
+            raise RuntimeError("recovered candidate lacks durable Codex thread identity")
+        validate_changed_paths(proposal, committed.changed_paths)
+        return EngineeringAttempt(
+            candidate=_candidate(
+                cycle_id,
+                attempt,
+                worktree,
+                committed,
+                committed.codex_thread_id,
+            ),
+            worktree=worktree,
+            codex_status="completed",
+        )
+
+
+def _candidate(
+    cycle_id: str,
+    attempt: int,
+    worktree: Worktree,
+    committed: CandidateCommit,
+    codex_thread_id: str,
+) -> CandidateRevision:
+    return CandidateRevision(
+        id=f"{cycle_id}-candidate-{attempt}",
+        cycle_id=cycle_id,
+        worktree_path=str(worktree.path),
+        branch_name=worktree.branch,
+        base_commit=worktree.base_commit,
+        candidate_commit=committed.commit,
+        tree_hash=committed.tree,
+        changed_paths=committed.changed_paths,
+        codex_thread_id=codex_thread_id,
+        implementation_attempt=attempt,
+    )
 
 
 def _implementation_prompt(proposal: ChangeProposal) -> str:

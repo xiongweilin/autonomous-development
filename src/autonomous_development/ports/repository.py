@@ -33,6 +33,7 @@ class CandidateCommit:
     commit: str
     tree: str
     changed_paths: tuple[str, ...]
+    codex_thread_id: str | None = None
 
 
 class RepositoryProvider(Protocol):
@@ -48,11 +49,19 @@ class RepositoryProvider(Protocol):
 
     def changed_paths(self, worktree: Worktree) -> tuple[str, ...]: ...
 
+    def recover_candidate(
+        self,
+        worktree: Worktree,
+        *,
+        expected_message: str,
+    ) -> CandidateCommit | None: ...
+
     def commit_candidate(
         self,
         worktree: Worktree,
         *,
         message: str,
+        codex_thread_id: str,
     ) -> CandidateCommit: ...
 
     def remove_worktree(self, baseline: RepositoryBaseline, worktree: Worktree) -> None: ...

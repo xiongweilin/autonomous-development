@@ -18,6 +18,7 @@ class CodexTurnRequest:
     cwd: Path
     sandbox: CodexSandbox
     thread_id: str | None = None
+    resume_key: str | None = None
     model: str | None = None
     output_schema: Mapping[str, object] | None = None
     timeout_seconds: int = 1800
@@ -29,6 +30,8 @@ class CodexTurnRequest:
             raise ValueError("Codex cwd must be absolute")
         if self.timeout_seconds < 1:
             raise ValueError("Codex timeout must be positive")
+        if self.resume_key is not None and not self.resume_key.strip():
+            raise ValueError("Codex resume key must be non-empty when provided")
 
 
 @dataclass(frozen=True, slots=True)

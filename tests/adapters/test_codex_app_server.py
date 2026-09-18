@@ -14,15 +14,24 @@ from autonomous_development.ports.codex import (
 )
 
 
-def write_fake_server(path: Path, *, sleep_before_output: float = 0.0) -> Path:
+def write_fake_server(
+    path: Path,
+    *,
+    sleep_once_on_turn_start: float = 0.0,
+) -> tuple[Path, Path]:
     script = path / "fake_codex.py"
+    log = path / "methods.log"
+    marker = path / "slept.marker"
     script.write_text(
         f"""
 import json
+import pathlib
 import sys
 import time
 
-SLEEP = {sleep_before_output!r}
+SLEEP_TURN = {sleep_once_on_turn_start!r}
+LOG = pathlib.Path({str(log)!r})
+MARKER = pathlib.Path({str(marker)!r})
 
 def emit(value):
     print(json.dumps(value), flush=True)
@@ -30,9 +39,9 @@ def emit(value):
 for line in sys.stdin:
     message = json.loads(line)
     method = message.get("method")
-    if SLEEP:
-        time.sleep(SLEEP)
-        SLEEP = 0
+    with LOG.open("a", encoding="utf-8") as handle:
+        handle.write(str(method) + "\\n")
+
     if method == "initialize":
         emit({{"id": message["id"], "result": {{}}}})
     elif method == "initialized":
@@ -42,8 +51,13 @@ for line in sys.stdin:
             params = message["params"]
             assert params["approvalPolicy"] == "never"
             assert params["sandbox"] == "workspaceWrite"
+        else:
+            assert message["params"]["threadId"] == "thr-test"
         emit({{"id": message["id"], "result": {{"thread": {{"id": "thr-test"}}}}}})
     elif method == "turn/start":
+        if SLEEP_TURN and not MARKER.exists():
+            MARKER.write_text("slept", encoding="utf-8")
+            time.sleep(SLEEP_TURN)
         params = message["params"]
         policy = params["sandboxPolicy"]
         assert policy["type"] == "workspaceWrite"
@@ -60,11 +74,21 @@ for line in sys.stdin:
 """,
         encoding="utf-8",
     )
-    return script
+    return script, log
 
 
-def test_app_server_handshake_and_bounded_turn(tmp_path) -> None:
-    fake = write_fake_server(tmp_path)
+def request(tmp_path: Path, *, timeout_seconds: int = 5) -> CodexTurnRequest:
+    return CodexTurnRequest(
+        prompt="change the code",
+        cwd=tmp_path,
+        sandbox=CodexSandbox.WORKSPACE_WRITE,
+        resume_key="cycle-1:implementation:1",
+        timeout_seconds=timeout_seconds,
+    )
+
+
+def test_app_server_handshake_and_bounded_turn(tmp_path: Path) -> None:
+    fake, _ = write_fake_server(tmp_path)
     provider = CodexAppServer(command=(sys.executable, str(fake)))
     result = provider.run_turn(
         CodexTurnRequest(
@@ -81,8 +105,38 @@ def test_app_server_handshake_and_bounded_turn(tmp_path) -> None:
     assert result.agent_messages == ("done",)
 
 
-def test_app_server_timeout_is_wall_clock_bounded(tmp_path) -> None:
-    fake = write_fake_server(tmp_path, sleep_before_output=5)
+def test_thread_journal_resumes_after_process_dies_while_waiting(tmp_path: Path) -> None:
+    fake, log = write_fake_server(tmp_path, sleep_once_on_turn_start=5)
+    journal = (tmp_path / "thread-journal").resolve()
+    first = CodexAppServer(
+        command=(sys.executable, str(fake)),
+        thread_journal_root=journal,
+    )
+    started = time.monotonic()
+
+    with pytest.raises(CodexProviderError, match="timed out"):
+        first.run_turn(request(tmp_path.resolve(), timeout_seconds=1))
+
+    assert time.monotonic() - started < 4
+    journal_files = tuple(journal.glob("*.json"))
+    assert len(journal_files) == 1
+    assert "thr-test" in journal_files[0].read_text(encoding="utf-8")
+
+    restarted = CodexAppServer(
+        command=(sys.executable, str(fake)),
+        thread_journal_root=journal,
+    )
+    result = restarted.run_turn(request(tmp_path.resolve(), timeout_seconds=5))
+    assert result.completed
+    assert result.thread_id == "thr-test"
+
+    methods = log.read_text(encoding="utf-8").splitlines()
+    assert methods.count("thread/start") == 1
+    assert methods.count("thread/resume") == 1
+
+
+def test_app_server_timeout_is_wall_clock_bounded(tmp_path: Path) -> None:
+    fake, _ = write_fake_server(tmp_path, sleep_once_on_turn_start=5)
     provider = CodexAppServer(command=(sys.executable, str(fake)))
     started = time.monotonic()
 
