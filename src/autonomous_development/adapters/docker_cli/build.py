@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+
 import os
 import tempfile
 from pathlib import Path
@@ -52,8 +54,10 @@ class DockerBuildProvider(BuildProvider):
                 {
                     "candidate_id": request.candidate_id,
                     "returncode": result.returncode,
-                    "stdout": result.stdout,
-                    "stderr": result.stderr,
+                    "stdout_bytes": len(result.stdout.encode("utf-8")),
+                    "stdout_sha256": _digest_text(result.stdout),
+                    "stderr_bytes": len(result.stderr.encode("utf-8")),
+                    "stderr_sha256": _digest_text(result.stderr),
                     "dockerfile": str(request.dockerfile),
                 },
             )
@@ -69,3 +73,7 @@ class DockerBuildProvider(BuildProvider):
             return BuiltImage(image_digest=image_digest, evidence_ref=evidence_ref)
         finally:
             iidfile.unlink(missing_ok=True)
+
+
+def _digest_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
