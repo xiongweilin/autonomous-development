@@ -10,3 +10,15 @@ class QualityGate(Protocol):
     def gate_id(self) -> str: ...
 
     def evaluate(self, candidate: CandidateRevision) -> VerificationCheck: ...
+
+
+
+class PerformanceGateFactory(Protocol):
+    def create(
+        self,
+        *,
+        base_url: str,
+        script_path: str,
+        required_threshold_metrics: tuple[str, ...],
+        timeout_seconds: int,
+    ) -> QualityGate: ...
