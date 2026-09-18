@@ -49,7 +49,7 @@ class LocalEvidenceStore(EvidenceStore):
             os.link(temporary, target)
         except FileExistsError:
             if target.read_bytes() != encoded:
-                raise RuntimeError("evidence digest collision or mutated evidence")
+                raise RuntimeError("evidence digest collision or mutated evidence") from None
         finally:
             temporary.unlink(missing_ok=True)
         return f"file:{target}#sha256:{digest}"
