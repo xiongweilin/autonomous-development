@@ -3,25 +3,25 @@ from pathlib import Path
 
 from dbos import DBOS, DBOSConfig, DBOSConfiguredInstance, SetWorkflowID
 
-from autonomous_development.application.feedback_controller import FeedbackIterationPlan
+from autonomous_development.application.iteration_scheduler import FeedbackIterationResult
 from autonomous_development.workflows.feedback_autonomy import FeedbackAutonomyWorkflow
 
 
-class FakeController:
-    def __init__(self, plan: FeedbackIterationPlan | None) -> None:
-        self.plan = plan
+class FakeScheduler:
+    def __init__(self, result: FeedbackIterationResult) -> None:
+        self.result = result
         self.calls = 0
 
     def prepare_next(
         self,
         target_id: str,
         *,
-        closed_at: datetime,
-    ) -> FeedbackIterationPlan | None:
+        scheduled_time: datetime,
+    ) -> FeedbackIterationResult:
         self.calls += 1
         assert target_id == "target-1"
-        assert closed_at.tzinfo is not None
-        return self.plan
+        assert scheduled_time.tzinfo is not None
+        return self.result
 
 
 @DBOS.dbos_class()
@@ -66,29 +66,31 @@ class FakeSoak(DBOSConfiguredInstance):
         return {"status": "completed", "cycle_id": cycle_id}
 
 
-def executable_plan() -> FeedbackIterationPlan:
-    return FeedbackIterationPlan(
+def prepared_result() -> FeedbackIterationResult:
+    return FeedbackIterationResult(
+        status="prepared",
         target_id="target-1",
         feedback_id="feedback-1",
-        release_id="release-1",
-        evidence_window_id="window-1",
         cycle_id="cycle-1",
         proposal_id="proposal-1",
-        executable=True,
-        reason="prepared",
     )
 
 
-def blocked_plan() -> FeedbackIterationPlan:
-    return FeedbackIterationPlan(
+def idle_result() -> FeedbackIterationResult:
+    return FeedbackIterationResult(
+        status="idle",
+        target_id="target-1",
+        reason="no unprocessed feedback meets the trigger policy",
+    )
+
+
+def blocked_result() -> FeedbackIterationResult:
+    return FeedbackIterationResult(
+        status="blocked-low-confidence",
         target_id="target-1",
         feedback_id="feedback-1",
-        release_id="release-1",
-        evidence_window_id="window-1",
         cycle_id="cycle-1",
-        proposal_id=None,
-        executable=False,
-        reason="low confidence",
+        reason="diagnosis confidence below autonomous threshold",
     )
 
 
@@ -96,11 +98,11 @@ def launch(
     tmp_path: Path,
     *,
     name: str,
-    plan: FeedbackIterationPlan | None,
+    result: FeedbackIterationResult,
     execution_status: str = "promoted",
 ) -> tuple[
     FeedbackAutonomyWorkflow,
-    FakeController,
+    FakeScheduler,
     FakeExecution,
     FakeSoak,
 ]:
@@ -110,27 +112,27 @@ def launch(
         "system_database_url": f"sqlite:///{tmp_path / (name + '.db')}",
     }
     DBOS(config=config)
-    controller = FakeController(plan)
+    scheduler = FakeScheduler(result)
     execution = FakeExecution(
         status=execution_status,
         config_name=f"{name}-execution",
     )
     soak = FakeSoak(config_name=f"{name}-soak")
     workflow = FeedbackAutonomyWorkflow(
-        controller,  # type: ignore[arg-type]
+        scheduler,  # type: ignore[arg-type]
         execution,  # type: ignore[arg-type]
         soak,  # type: ignore[arg-type]
         config_name=f"{name}-parent",
     )
     DBOS.launch()
-    return workflow, controller, execution, soak
+    return workflow, scheduler, execution, soak
 
 
 def test_feedback_parent_workflow_replays_without_repeating_children(tmp_path: Path) -> None:
-    workflow, controller, execution, soak = launch(
+    workflow, scheduler, execution, soak = launch(
         tmp_path,
         name="feedback-autonomy-replay",
-        plan=executable_plan(),
+        result=prepared_result(),
     )
     scheduled = datetime.now(UTC).isoformat()
     try:
@@ -141,7 +143,7 @@ def test_feedback_parent_workflow_replays_without_repeating_children(tmp_path: P
 
         assert first == second
         assert first["status"] == "completed"
-        assert controller.calls == 1
+        assert scheduler.calls == 1
         assert execution.calls == 1
         assert soak.calls == 1
     finally:
@@ -149,32 +151,33 @@ def test_feedback_parent_workflow_replays_without_repeating_children(tmp_path: P
 
 
 def test_feedback_parent_workflow_is_idle_without_trigger(tmp_path: Path) -> None:
-    workflow, controller, execution, soak = launch(
+    workflow, scheduler, execution, soak = launch(
         tmp_path,
         name="feedback-autonomy-idle",
-        plan=None,
+        result=idle_result(),
     )
     try:
         result = workflow.run("target-1", datetime.now(UTC).isoformat())
-        assert result == {"status": "idle", "target_id": "target-1"}
-        assert controller.calls == 1
+        assert result["status"] == "idle"
+        assert result["reason"] == "no unprocessed feedback meets the trigger policy"
+        assert scheduler.calls == 1
         assert execution.calls == 0
         assert soak.calls == 0
     finally:
         DBOS.destroy(workflow_completion_timeout_sec=5)
 
 
-def test_feedback_parent_workflow_stops_on_blocked_diagnosis(tmp_path: Path) -> None:
+def test_feedback_parent_workflow_stops_on_low_confidence_diagnosis(tmp_path: Path) -> None:
     workflow, _, execution, soak = launch(
         tmp_path,
         name="feedback-autonomy-blocked",
-        plan=blocked_plan(),
+        result=blocked_result(),
     )
     try:
         result = workflow.run("target-1", datetime.now(UTC).isoformat())
-        assert result["status"] == "blocked"
+        assert result["status"] == "blocked-low-confidence"
         assert result["cycle_id"] == "cycle-1"
-        assert result["reason"] == "low confidence"
+        assert result["reason"] == "diagnosis confidence below autonomous threshold"
         assert execution.calls == 0
         assert soak.calls == 0
     finally:
@@ -185,7 +188,7 @@ def test_feedback_parent_workflow_does_not_soak_rejected_execution(tmp_path: Pat
     workflow, _, execution, soak = launch(
         tmp_path,
         name="feedback-autonomy-rejected",
-        plan=executable_plan(),
+        result=prepared_result(),
         execution_status="rejected",
     )
     try:
