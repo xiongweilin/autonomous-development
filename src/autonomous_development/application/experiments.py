@@ -40,6 +40,16 @@ class ExperimentService:
             raise RuntimeError("canary decision receipt is ahead of persisted experiment")
         return experiment, _decision_from_receipt(receipt)
 
+    def require_recorded_decision(
+        self,
+        experiment_id: str,
+        decision: CanaryStageDecision,
+    ) -> None:
+        self.get(experiment_id)
+        receipts = self._repository.list_stage_decisions(experiment_id)
+        if not any(_decision_from_receipt(receipt) == decision for receipt in receipts):
+            raise ValueError("canary decision is not present in durable experiment history")
+
     def promotion_history(
         self,
         experiment_id: str,
