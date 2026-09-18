@@ -20,6 +20,13 @@ class ExperimentService:
         self._repository = repository
 
     def create(self, experiment: Experiment) -> Experiment:
+        existing = self._repository.get(experiment.id)
+        if existing is not None:
+            if existing != experiment:
+                raise ValueError(
+                    f"experiment id {experiment.id} is already bound to different content"
+                )
+            return existing
         return self._repository.add(experiment)
 
     def get(self, experiment_id: str) -> Experiment:

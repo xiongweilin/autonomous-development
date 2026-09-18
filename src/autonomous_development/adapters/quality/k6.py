@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 from autonomous_development.domain.enums import VerificationStatus
 from autonomous_development.domain.models import CandidateRevision, VerificationCheck
 from autonomous_development.ports.evidence import EvidenceStore
+from autonomous_development.ports.quality import PerformanceGateFactory, QualityGate
 from autonomous_development.ports.process import (
     CommandRequest,
     CommandTimedOut,
@@ -156,3 +157,37 @@ def _require_loopback(base_url: str) -> None:
     parsed = urlsplit(base_url)
     if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
         raise ValueError("V1 performance gate is restricted to local HTTP loopback")
+
+
+
+class K6PerformanceGateFactory(PerformanceGateFactory):
+    def __init__(
+        self,
+        *,
+        runner: ProcessRunner,
+        evidence: EvidenceStore,
+        gate_id: str = "performance",
+    ) -> None:
+        if not gate_id.strip():
+            raise ValueError("performance gate id must be non-empty")
+        self._runner = runner
+        self._evidence = evidence
+        self._gate_id = gate_id
+
+    def create(
+        self,
+        *,
+        base_url: str,
+        script_path: str,
+        required_threshold_metrics: tuple[str, ...],
+        timeout_seconds: int,
+    ) -> QualityGate:
+        return K6PerformanceGate(
+            runner=self._runner,
+            evidence=self._evidence,
+            base_url=base_url,
+            script_path=script_path,
+            required_threshold_metrics=required_threshold_metrics,
+            timeout_seconds=timeout_seconds,
+            gate_id=self._gate_id,
+        )
