@@ -181,8 +181,11 @@ def _policy(values: dict[str, object]) -> MutationPolicy:
     return MutationPolicy(
         allowed_paths=_strings(values["allowed_paths_json"], "allowed_paths"),
         forbidden_paths=_strings(values["forbidden_paths_json"], "forbidden_paths"),
-        max_changed_files=int(values["max_changed_files"]),
-        max_implementation_attempts=int(values["max_implementation_attempts"]),
+        max_changed_files=_integer(values["max_changed_files"], "max_changed_files"),
+        max_implementation_attempts=_integer(
+            values["max_implementation_attempts"],
+            "max_implementation_attempts",
+        ),
     )
 
 
@@ -200,3 +203,10 @@ def _utc(value: object, field: str) -> datetime:
     if not isinstance(value, datetime):
         raise RuntimeError(f"persisted registry {field} is not a datetime")
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+
+def _integer(value: object, field: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise RuntimeError(f"persisted registry {field} is not an integer")
+    return value
