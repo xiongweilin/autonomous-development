@@ -13,6 +13,7 @@ from autonomous_development.application.engineering import EngineeringService
 from autonomous_development.application.experiments import ExperimentService
 from autonomous_development.application.proposals import ProposalService
 from autonomous_development.application.release_finalization import ReleaseFinalizationService
+from autonomous_development.application.release_runtime import ReleaseRuntimeService
 from autonomous_development.application.releases import ReleaseService
 from autonomous_development.application.source_promotion import SourcePromotionService
 from autonomous_development.application.verification import VerificationService
@@ -57,12 +58,12 @@ class AutonomousIterationWorkflow(DBOSConfiguredInstance):
         canary: CanaryService,
         releases: ReleaseService,
         finalization: ReleaseFinalizationService,
+        release_runtime: ReleaseRuntimeService,
         source_promotion: SourcePromotionService,
         contract: TargetContract,
         repository_root: Path,
         worktree_root: Path,
         default_branch: str,
-        control_base_url: str,
         performance_gate_id: str = "performance",
         canary_hold_sleep_seconds: float = 30.0,
         config_name: str = "autonomous-iteration-v1",
@@ -71,8 +72,6 @@ class AutonomousIterationWorkflow(DBOSConfiguredInstance):
             raise ValueError("iteration workflow paths must be absolute")
         if not default_branch.strip():
             raise ValueError("default branch must be non-empty")
-        if not control_base_url.strip():
-            raise ValueError("control base URL must be non-empty")
         if not performance_gate_id.strip():
             raise ValueError("performance gate id must be non-empty")
         if canary_hold_sleep_seconds <= 0:
@@ -88,12 +87,12 @@ class AutonomousIterationWorkflow(DBOSConfiguredInstance):
         self._canary = canary
         self._releases = releases
         self._finalization = finalization
+        self._release_runtime = release_runtime
         self._source_promotion = source_promotion
         self._contract = contract
         self._repository_root = repository_root
         self._worktree_root = worktree_root
         self._default_branch = default_branch
-        self._control_base_url = control_base_url
         self._performance_gate_id = performance_gate_id
         self._canary_hold_sleep_seconds = canary_hold_sleep_seconds
         super().__init__(config_name=config_name)
@@ -183,6 +182,7 @@ class AutonomousIterationWorkflow(DBOSConfiguredInstance):
         while True:
             canary_doc = self._canary_step(
                 experiment_id,
+                proposal.baseline_release_id,
                 deployment_bundle,
                 operation_id=f"{operation_id}:canary:{canary_round}",
             )
@@ -505,12 +505,14 @@ class AutonomousIterationWorkflow(DBOSConfiguredInstance):
     def _canary_step(
         self,
         experiment_id: str,
+        baseline_release_id: str,
         deployment_bundle: dict[str, object],
         operation_id: str,
     ) -> dict[str, object]:
         runtime = _runtime_from_document(
             _mapping(deployment_bundle.get("runtime"), "runtime")
         )
+        control_runtime = self._release_runtime.resolve(baseline_release_id)
         guardrails = CanaryGuardrails(
             max_candidate_error_rate=self._contract.canary.max_candidate_error_rate,
             max_error_rate_delta=self._contract.canary.max_error_rate_delta,
@@ -522,7 +524,7 @@ class AutonomousIterationWorkflow(DBOSConfiguredInstance):
         result = self._canary.run_stage(
             experiment_id,
             guardrails,
-            control_base_url=self._control_base_url,
+            control_base_url=control_runtime.base_url,
             candidate_base_url=runtime.base_url,
             operation_id=operation_id,
         )

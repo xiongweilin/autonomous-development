@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import os
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict
-from fcntl import LOCK_EX, LOCK_UN, flock
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -157,11 +158,11 @@ class AtomicFileTrafficDirector(TrafficDirector):
     def _lock(self) -> Iterator[None]:
         lock_path = self._root / ".route.lock"
         with lock_path.open("a+b") as handle:
-            flock(handle.fileno(), LOCK_EX)
+            _acquire_file_lock(handle)
             try:
                 yield
             finally:
-                flock(handle.fileno(), LOCK_UN)
+                _release_file_lock(handle)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -218,3 +219,37 @@ def _snapshot_from_document(document: dict[str, Any]) -> TrafficRouteSnapshot:
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise RuntimeError("traffic route snapshot is malformed") from exc
+
+
+
+def _acquire_file_lock(handle: Any) -> None:
+    if os.name == "nt":  # pragma: no cover - exercised on Windows
+        module = importlib.import_module("msvcrt")
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            handle.write(b"\0")
+            handle.flush()
+        handle.seek(0)
+        deadline = time.monotonic() + 30.0
+        while True:
+            try:
+                module.locking(handle.fileno(), module.LK_NBLCK, 1)
+                return
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("timed out acquiring traffic state lock") from None
+                time.sleep(0.05)
+
+    module = importlib.import_module("fcntl")
+    module.flock(handle.fileno(), module.LOCK_EX)
+
+
+def _release_file_lock(handle: Any) -> None:
+    if os.name == "nt":  # pragma: no cover - exercised on Windows
+        module = importlib.import_module("msvcrt")
+        handle.seek(0)
+        module.locking(handle.fileno(), module.LK_UNLCK, 1)
+        return
+
+    module = importlib.import_module("fcntl")
+    module.flock(handle.fileno(), module.LOCK_UN)

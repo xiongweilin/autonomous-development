@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from autonomous_development.application.cycles import CycleService
 from autonomous_development.application.release_catalog import ReleaseCatalogService
+from autonomous_development.application.release_runtime import ReleaseRuntimeService
 from autonomous_development.domain.canary import CanaryGuardrails
 from autonomous_development.domain.enums import (
     CycleState,
@@ -26,12 +27,14 @@ class PostPromotionSoakService:
         observer: CanaryObserver,
         releases: ReleaseCatalogService,
         decisions: SoakDecisionRepository,
+        runtime: ReleaseRuntimeService,
     ) -> None:
         self._cycles = cycles
         self._traffic = traffic
         self._observer = observer
         self._releases = releases
         self._decisions = decisions
+        self._runtime = runtime
 
     def start(self, cycle_id: str, *, operation_id: str) -> DevelopmentCycle:
         cycle = self._cycles.get(cycle_id)
@@ -58,8 +61,6 @@ class PostPromotionSoakService:
         stage: CanaryStage,
         guardrails: CanaryGuardrails,
         *,
-        control_base_url: str,
-        candidate_base_url: str,
         route_operation_id: str,
         decision_operation_id: str,
     ) -> PostPromotionSoakDecision:
@@ -77,13 +78,18 @@ class PostPromotionSoakService:
         if stage.weight_percent != 100:
             raise ValueError("post-promotion soak stage must be 100 percent")
 
+        control_runtime = self._runtime.resolve(cycle.baseline_release_id)
+        serving, candidate_runtime = self._runtime.resolve_serving(cycle.target_id)
+        if serving.deployment_id != cycle.candidate_deployment_id:
+            raise ValueError("serving release is not the promoted candidate deployment")
+
         soak_experiment_id = f"{cycle.experiment_id}-soak"
         route = self._traffic.apply(
             TrafficSplit(
                 experiment_id=soak_experiment_id,
                 stage_index=0,
-                control_base_url=control_base_url,
-                candidate_base_url=candidate_base_url,
+                control_base_url=control_runtime.base_url,
+                candidate_base_url=candidate_runtime.base_url,
                 candidate_weight_percent=100,
                 operation_id=route_operation_id,
             )
@@ -107,8 +113,6 @@ class PostPromotionSoakService:
         *,
         decision_operation_id: str,
         effect_operation_id: str,
-        control_base_url: str,
-        candidate_base_url: str,
     ) -> DevelopmentCycle:
         receipt = self._decisions.get(decision_operation_id)
         if receipt is None or receipt.cycle_id != cycle_id:
@@ -142,11 +146,15 @@ class PostPromotionSoakService:
         if cycle.experiment_id is None:
             raise ValueError("soaking cycle has no experiment identity")
 
+        control_runtime = self._runtime.resolve(cycle.baseline_release_id)
+        serving, candidate_runtime = self._runtime.resolve_serving(cycle.target_id)
+        if serving.deployment_id != cycle.candidate_deployment_id:
+            raise ValueError("serving release is not the promoted candidate deployment")
         self._traffic.restore_control(
             experiment_id=f"{cycle.experiment_id}-soak",
             stage_index=0,
-            control_base_url=control_base_url,
-            candidate_base_url=candidate_base_url,
+            control_base_url=control_runtime.base_url,
+            candidate_base_url=candidate_runtime.base_url,
             operation_id=f"{effect_operation_id}:traffic",
         )
         self._releases.set_serving(
