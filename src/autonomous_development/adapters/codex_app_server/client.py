@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import queue
 import subprocess
+import threading
 import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import IO, Any
+from typing import Any
 
 from autonomous_development.ports.codex import (
     CodexEvent,
@@ -18,20 +20,21 @@ from autonomous_development.ports.codex import (
 
 
 class CodexAppServer(CodexProvider):
-    """One bounded Codex turn per app-server process.
+    """Run one bounded Codex turn per app-server process.
 
-    Thread identity is durable in Codex; process identity is deliberately not.
+    Codex thread identity is durable; app-server process identity deliberately is not.
     """
 
     def __init__(
         self,
         *,
-        executable: str = "codex",
-        extra_args: Sequence[str] = (),
+        command: Sequence[str] = ("codex", "app-server"),
         client_name: str = "autonomous_development",
         client_version: str = "0.1.0",
     ) -> None:
-        self._command = (executable, "app-server", *extra_args)
+        if not command:
+            raise ValueError("Codex app-server command must be non-empty")
+        self._command = tuple(command)
         self._client_name = client_name
         self._client_version = client_version
 
@@ -50,6 +53,14 @@ class CodexAppServer(CodexProvider):
             process.kill()
             raise CodexProviderError("Codex app-server pipes are unavailable")
 
+        messages: queue.Queue[str | None] = queue.Queue()
+        reader = threading.Thread(
+            target=_read_lines,
+            args=(process.stdout, messages),
+            name="codex-app-server-reader",
+            daemon=True,
+        )
+        reader.start()
         deadline = time.monotonic() + request.timeout_seconds
         events: list[CodexEvent] = []
         try:
@@ -67,7 +78,7 @@ class CodexAppServer(CodexProvider):
                     },
                 },
             )
-            self._response(process.stdout, expected_id=1, deadline=deadline, events=events)
+            self._response(messages, expected_id=1, deadline=deadline, events=events)
             self._send(process.stdin, {"method": "initialized", "params": {}})
 
             method = "thread/resume" if request.thread_id else "thread/start"
@@ -87,7 +98,7 @@ class CodexAppServer(CodexProvider):
                 )
             self._send(process.stdin, {"method": method, "id": 2, "params": params})
             thread_response = self._response(
-                process.stdout,
+                messages,
                 expected_id=2,
                 deadline=deadline,
                 events=events,
@@ -95,13 +106,12 @@ class CodexAppServer(CodexProvider):
             thread = _mapping(thread_response.get("thread"), "thread")
             thread_id = _string(thread.get("id"), "thread.id")
 
-            sandbox_policy = _sandbox_policy(request.sandbox, request.cwd)
             turn_params: dict[str, object] = {
                 "threadId": thread_id,
                 "input": [{"type": "text", "text": request.prompt}],
                 "cwd": str(request.cwd),
                 "approvalPolicy": "never",
-                "sandboxPolicy": sandbox_policy,
+                "sandboxPolicy": _sandbox_policy(request.sandbox, request.cwd),
             }
             if request.model:
                 turn_params["model"] = request.model
@@ -112,7 +122,7 @@ class CodexAppServer(CodexProvider):
                 {"method": "turn/start", "id": 3, "params": turn_params},
             )
             turn_response = self._response(
-                process.stdout,
+                messages,
                 expected_id=3,
                 deadline=deadline,
                 events=events,
@@ -120,8 +130,8 @@ class CodexAppServer(CodexProvider):
             turn = _mapping(turn_response.get("turn"), "turn")
             turn_id = _string(turn.get("id"), "turn.id")
 
-            status, messages = self._await_completion(
-                process.stdout,
+            status, agent_messages = self._await_completion(
+                messages,
                 thread_id=thread_id,
                 turn_id=turn_id,
                 deadline=deadline,
@@ -132,31 +142,26 @@ class CodexAppServer(CodexProvider):
                 turn_id=turn_id,
                 status=status,
                 events=tuple(events),
-                agent_messages=tuple(messages),
+                agent_messages=tuple(agent_messages),
             )
         except (BrokenPipeError, OSError, ValueError, json.JSONDecodeError) as exc:
             raise CodexProviderError(str(exc)) from exc
         finally:
-            if process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait(timeout=5)
+            _terminate(process)
+            reader.join(timeout=1)
 
     def _await_completion(
         self,
-        stdout: IO[str],
+        messages: queue.Queue[str | None],
         *,
         thread_id: str,
         turn_id: str,
         deadline: float,
         events: list[CodexEvent],
     ) -> tuple[str, list[str]]:
-        messages: list[str] = []
+        agent_messages: list[str] = []
         while True:
-            message = self._read(stdout, deadline)
+            message = self._read(messages, deadline)
             method = message.get("method")
             if not isinstance(method, str):
                 continue
@@ -167,21 +172,14 @@ class CodexAppServer(CodexProvider):
                 if isinstance(item, Mapping) and item.get("type") == "agentMessage":
                     text = item.get("text")
                     if isinstance(text, str) and text:
-                        messages.append(text)
-            elif method == "item/agentMessage/delta":
-                delta = params.get("delta")
-                if isinstance(delta, str):
-                    if messages:
-                        messages[-1] += delta
-                    else:
-                        messages.append(delta)
+                        agent_messages.append(text)
             elif method == "turn/completed":
                 completed = _mapping(params.get("turn"), "completed turn")
                 completed_id = _string(completed.get("id"), "completed turn.id")
                 if completed_id != turn_id:
                     continue
                 status = _string(completed.get("status"), "completed turn.status")
-                return status, messages
+                return status, agent_messages
             elif method == "turn/error":
                 raise CodexProviderError(
                     f"Codex turn failed for thread {thread_id}: {params!r}"
@@ -189,14 +187,14 @@ class CodexAppServer(CodexProvider):
 
     def _response(
         self,
-        stdout: IO[str],
+        messages: queue.Queue[str | None],
         *,
         expected_id: int,
         deadline: float,
         events: list[CodexEvent],
     ) -> Mapping[str, object]:
         while True:
-            message = self._read(stdout, deadline)
+            message = self._read(messages, deadline)
             if message.get("id") == expected_id:
                 error = message.get("error")
                 if error is not None:
@@ -208,21 +206,47 @@ class CodexAppServer(CodexProvider):
                 events.append(CodexEvent(method=method, params=dict(params)))
 
     @staticmethod
-    def _send(stdin: IO[str], message: Mapping[str, object]) -> None:
+    def _send(stdin: Any, message: Mapping[str, object]) -> None:
         stdin.write(json.dumps(message, separators=(",", ":")) + "\n")
         stdin.flush()
 
     @staticmethod
-    def _read(stdout: IO[str], deadline: float) -> dict[str, Any]:
-        if time.monotonic() >= deadline:
+    def _read(
+        messages: queue.Queue[str | None],
+        deadline: float,
+    ) -> dict[str, Any]:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
             raise CodexProviderError("Codex turn timed out")
-        line = stdout.readline()
-        if not line:
+        try:
+            line = messages.get(timeout=remaining)
+        except queue.Empty as exc:
+            raise CodexProviderError("Codex turn timed out") from exc
+        if line is None:
             raise CodexProviderError("Codex app-server closed stdout unexpectedly")
         message = json.loads(line)
         if not isinstance(message, dict):
             raise CodexProviderError("Codex app-server emitted a non-object JSON message")
         return message
+
+
+def _read_lines(stdout: Any, messages: queue.Queue[str | None]) -> None:
+    try:
+        for line in stdout:
+            messages.put(line)
+    finally:
+        messages.put(None)
+
+
+def _terminate(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
 
 
 def _sandbox_policy(sandbox: CodexSandbox, cwd: Path) -> dict[str, object]:
