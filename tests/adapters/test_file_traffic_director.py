@@ -58,7 +58,9 @@ def test_new_operation_advances_generation_and_restore_is_explicit(tmp_path: Pat
     )
     assert (first.generation, second.generation, restored.generation) == (1, 2, 3)
     assert restored.candidate_weight_percent == 0
-    assert traffic.read_current()["candidate_weight_percent"] == 0
+    current = traffic.read_current()
+    assert current is not None
+    assert current.candidate_weight_percent == 0
 
 
 def test_non_loopback_routes_are_rejected(tmp_path: Path) -> None:

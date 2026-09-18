@@ -7,6 +7,10 @@ from autonomous_development.domain.models import CanaryStage
 from autonomous_development.ports.traffic import TrafficRouteState
 
 
+class CanaryObservationError(RuntimeError):
+    pass
+
+
 class CanaryObserver(Protocol):
     def observe(
         self,

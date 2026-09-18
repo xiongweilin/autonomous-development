@@ -37,7 +37,23 @@ class TrafficRouteState:
     evidence_ref: str
 
 
-class TrafficDirector(Protocol):
+@dataclass(frozen=True, slots=True)
+class TrafficRouteSnapshot:
+    experiment_id: str
+    stage_index: int
+    control_base_url: str
+    candidate_base_url: str
+    candidate_weight_percent: int
+    operation_id: str
+    generation: int
+    evidence_ref: str
+
+
+class TrafficRouteReader(Protocol):
+    def read_current(self) -> TrafficRouteSnapshot | None: ...
+
+
+class TrafficDirector(TrafficRouteReader, Protocol):
     def apply(self, split: TrafficSplit) -> TrafficRouteState: ...
 
     def restore_control(

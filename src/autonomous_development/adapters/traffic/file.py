@@ -15,6 +15,7 @@ from uuid import uuid4
 from autonomous_development.ports.evidence import EvidenceStore
 from autonomous_development.ports.traffic import (
     TrafficDirector,
+    TrafficRouteSnapshot,
     TrafficRouteState,
     TrafficSplit,
 )
@@ -98,10 +99,10 @@ class AtomicFileTrafficDirector(TrafficDirector):
             )
         )
 
-    def read_current(self) -> dict[str, Any] | None:
+    def read_current(self) -> TrafficRouteSnapshot | None:
         with self._lock():
             current = self._read_current()
-            return dict(current) if current is not None else None
+            return _snapshot_from_document(current) if current is not None else None
 
     def _replay_receipt(
         self,
@@ -200,3 +201,20 @@ def _require_loopback(base_url: str) -> None:
     parsed = urlsplit(base_url)
     if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
         raise ValueError("V1 traffic routing is restricted to local HTTP loopback")
+
+
+
+def _snapshot_from_document(document: dict[str, Any]) -> TrafficRouteSnapshot:
+    try:
+        return TrafficRouteSnapshot(
+            experiment_id=str(document["experiment_id"]),
+            stage_index=int(document["stage_index"]),
+            control_base_url=str(document["control_base_url"]),
+            candidate_base_url=str(document["candidate_base_url"]),
+            candidate_weight_percent=int(document["candidate_weight_percent"]),
+            operation_id=str(document["operation_id"]),
+            generation=int(document["generation"]),
+            evidence_ref=str(document["evidence_ref"]),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError("traffic route snapshot is malformed") from exc

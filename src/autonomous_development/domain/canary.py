@@ -39,6 +39,7 @@ class CanaryStageEvidence:
     candidate_p95_latency_ms: float
     control_p95_latency_ms: float | None
     evidence_refs: tuple[str, ...]
+    telemetry_complete: bool = True
 
     def __post_init__(self) -> None:
         if not self.experiment_id.strip():
@@ -200,6 +201,8 @@ def _insufficient_reasons(
     evidence: CanaryStageEvidence,
 ) -> tuple[str, ...]:
     reasons: list[str] = []
+    if not evidence.telemetry_complete:
+        reasons.append("telemetry_incomplete")
     if evidence.observed_duration_seconds < stage.min_duration_seconds:
         reasons.append("duration")
     if evidence.total_requests < stage.min_requests:
