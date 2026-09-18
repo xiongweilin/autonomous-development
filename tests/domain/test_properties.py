@@ -6,7 +6,10 @@ from autonomous_development.domain.models import DevelopmentCycle
 from autonomous_development.domain.transitions import StaleCycleError, transition_cycle
 
 
-@given(actual=st.integers(min_value=0, max_value=100), delta=st.integers(min_value=1, max_value=100))
+@given(
+    actual=st.integers(min_value=0, max_value=100),
+    delta=st.integers(min_value=1, max_value=100),
+)
 def test_any_non_current_version_is_rejected(actual: int, delta: int) -> None:
     cycle = DevelopmentCycle(
         id="cycle",
