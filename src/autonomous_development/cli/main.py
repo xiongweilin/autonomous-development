@@ -16,7 +16,7 @@ def main() -> None:
     subcommands.add_parser("ready", help="run live local readiness probes")
     arguments = parser.parse_args()
 
-    settings = RuntimeSettings()
+    settings = RuntimeSettings.from_environment()
     runtime = compose_runtime(settings)
     if arguments.command == "ready":
         try:
