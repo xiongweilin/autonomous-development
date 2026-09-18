@@ -36,6 +36,7 @@ def upgrade() -> None:
     )
     op.create_table(
         "canary_stage_operations",
+        sa.Column("sequence_id", sa.Integer(), autoincrement=True, nullable=False),
         sa.Column("operation_id", sa.String(length=192), nullable=False),
         sa.Column("experiment_id", sa.String(length=128), nullable=False),
         sa.Column("stage_index", sa.Integer(), nullable=False),
@@ -44,7 +45,8 @@ def upgrade() -> None:
         sa.Column("evidence_refs_json", sa.JSON(), nullable=False),
         sa.Column("violated_guardrails_json", sa.JSON(), nullable=False),
         sa.Column("reason", sa.String(length=512), nullable=False),
-        sa.PrimaryKeyConstraint("operation_id"),
+        sa.PrimaryKeyConstraint("sequence_id"),
+        sa.UniqueConstraint("operation_id", name="uq_canary_stage_operations_operation_id"),
     )
     op.create_index(
         "ix_canary_stage_operations_experiment_id",
