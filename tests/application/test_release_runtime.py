@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 
+import pytest
 from sqlalchemy import create_engine
 
 from autonomous_development.adapters.postgres.releases import SqlReleasedVersionRepository
@@ -20,13 +21,15 @@ from autonomous_development.ports.target_contract import (
 
 
 class FakeDeploymentProvider:
-    def __init__(self) -> None:
+    def __init__(self, *, wrong_deployment_id: bool = False) -> None:
         self.specs: list[DeploymentSpec] = []
+        self.wrong_deployment_id = wrong_deployment_id
 
     def ensure(self, spec: DeploymentSpec) -> DeploymentRuntime:
         self.specs.append(spec)
+        deployment_id = "wrong-deployment" if self.wrong_deployment_id else spec.deployment_id
         return DeploymentRuntime(
-            deployment_id=spec.deployment_id,
+            deployment_id=deployment_id,
             container_id=f"container-{spec.deployment_id}",
             base_url="http://127.0.0.1:4100",
             evidence_ref="runtime:1",
@@ -98,3 +101,53 @@ def test_release_runtime_is_resolved_from_durable_release_identity() -> None:
     assert spec.target_id == "target-1"
     assert spec.image_digest == release().artifact_digest
     assert spec.container_port == 8000
+
+
+
+def test_release_runtime_fails_closed_without_serving_release() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    metadata.create_all(engine)
+    service = ReleaseRuntimeService(
+        ReleaseCatalogService(SqlReleasedVersionRepository(engine)),
+        FakeDeploymentProvider(),
+        contract(),
+    )
+
+    with pytest.raises(ValueError, match="no serving release"):
+        service.resolve_serving("target-1")
+
+
+def test_release_runtime_rejects_release_for_another_target() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    metadata.create_all(engine)
+    catalog = ReleaseCatalogService(SqlReleasedVersionRepository(engine))
+    foreign = ReleasedVersion(
+        id="release-foreign",
+        target_id="target-2",
+        source_commit="a" * 40,
+        source_tree="b" * 40,
+        artifact_digest="sha256:" + "c" * 64,
+        objective_revision_id="objective-2",
+        deployment_id="deployment-2",
+        promoted_at=datetime.now(UTC),
+    )
+    catalog.register(foreign)
+    service = ReleaseRuntimeService(catalog, FakeDeploymentProvider(), contract())
+
+    with pytest.raises(ValueError, match="target does not match"):
+        service.resolve("release-foreign")
+
+
+def test_release_runtime_rejects_mismatched_deployment_reconciliation() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    metadata.create_all(engine)
+    catalog = ReleaseCatalogService(SqlReleasedVersionRepository(engine))
+    catalog.register(release())
+    service = ReleaseRuntimeService(
+        catalog,
+        FakeDeploymentProvider(wrong_deployment_id=True),
+        contract(),
+    )
+
+    with pytest.raises(RuntimeError, match="different release deployment"):
+        service.resolve("release-1")
