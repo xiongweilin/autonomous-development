@@ -160,6 +160,9 @@ class Traffic:
     def apply(self, split):
         raise AssertionError(f"traffic should not be applied: {split}")
 
+    def read_current(self):
+        return None
+
     def restore_control(self, **kwargs):
         raise AssertionError(f"traffic should not be restored: {kwargs}")
 
@@ -356,12 +359,11 @@ def test_apply_rollback_requires_experiment_identity() -> None:
         )
 
 
-def test_apply_rollback_rejects_mismatched_serving_candidate() -> None:
-    with pytest.raises(ValueError, match="not the promoted candidate deployment"):
+def test_apply_rollback_requires_durable_soak_route() -> None:
+    with pytest.raises(ValueError, match="active soak traffic route"):
         service(
             cycle(CycleState.SOAKING),
             receipt=receipt(SoakDecisionKind.ROLLBACK),
-            serving_deployment_id="other-deployment",
         ).apply(
             "cycle-1",
             decision_operation_id="decision-1",
