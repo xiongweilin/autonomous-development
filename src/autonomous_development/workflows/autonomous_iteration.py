@@ -35,6 +35,7 @@ from autonomous_development.domain.models import (
     VerificationCheck,
     VerificationRun,
 )
+from autonomous_development.ports.codex import CodexProviderError
 from autonomous_development.ports.deployment import DeploymentRuntime
 from autonomous_development.ports.quality import PerformanceGateFactory
 from autonomous_development.ports.target_contract import TargetContract
@@ -122,20 +123,36 @@ class AutonomousIterationWorkflow(DBOSConfiguredInstance):
             raise ValueError("at least one pre-deployment verification gate is required")
 
         self._start_development_step(cycle_id, proposal_id, operation_id)
-        candidate_doc = self._implement_step(
-            cycle_id,
-            proposal_id,
-            operation_id,
-            model,
-        )
+        try:
+            candidate_doc = self._implement_step(
+                cycle_id,
+                proposal_id,
+                operation_id,
+                model,
+            )
+        except Exception as exc:
+            return self._terminal_failure_result(
+                cycle_id,
+                operation_id,
+                phase="implementation",
+                error=exc,
+            )
         self._candidate_ready_step(cycle_id, candidate_doc, operation_id)
         self._start_verification_step(cycle_id, operation_id)
 
-        pre_verification_doc = self._pre_verification_step(
-            candidate_doc,
-            pre_gates,
-            cycle_id,
-        )
+        try:
+            pre_verification_doc = self._pre_verification_step(
+                candidate_doc,
+                pre_gates,
+                cycle_id,
+            )
+        except Exception as exc:
+            return self._terminal_failure_result(
+                cycle_id,
+                operation_id,
+                phase="pre-verification",
+                error=exc,
+            )
         pre_verification = _verification_from_document(pre_verification_doc)
         if not pre_verification.passed:
             cycle_doc = self._reject_step(
@@ -145,18 +162,42 @@ class AutonomousIterationWorkflow(DBOSConfiguredInstance):
             return _terminal_result(cycle_doc, "pre-deployment verification failed")
 
         self._verified_step(cycle_id, pre_verification.id, operation_id)
-        artifact_doc = self._build_step(candidate_doc, cycle_id)
+        try:
+            artifact_doc = self._build_step(candidate_doc, cycle_id)
+        except Exception as exc:
+            return self._terminal_failure_result(
+                cycle_id,
+                operation_id,
+                phase="build",
+                error=exc,
+            )
         self._built_step(cycle_id, artifact_doc, operation_id)
-        deployment_bundle = self._deploy_step(artifact_doc, cycle_id)
+        try:
+            deployment_bundle = self._deploy_step(artifact_doc, cycle_id)
+        except Exception as exc:
+            return self._terminal_failure_result(
+                cycle_id,
+                operation_id,
+                phase="deployment",
+                error=exc,
+            )
         self._staged_step(cycle_id, deployment_bundle, operation_id)
 
-        full_verification_doc = self._performance_step(
-            candidate_doc,
-            pre_verification_doc,
-            deployment_bundle,
-            proposal_doc,
-            cycle_id,
-        )
+        try:
+            full_verification_doc = self._performance_step(
+                candidate_doc,
+                pre_verification_doc,
+                deployment_bundle,
+                proposal_doc,
+                cycle_id,
+            )
+        except Exception as exc:
+            return self._terminal_failure_result(
+                cycle_id,
+                operation_id,
+                phase="performance",
+                error=exc,
+            )
         full_verification = _verification_from_document(full_verification_doc)
         if not full_verification.passed:
             cycle_doc = self._reject_step(
@@ -180,12 +221,20 @@ class AutonomousIterationWorkflow(DBOSConfiguredInstance):
 
         canary_round = 0
         while True:
-            canary_doc = self._canary_step(
-                experiment_id,
-                proposal.baseline_release_id,
-                deployment_bundle,
-                operation_id=f"{operation_id}:canary:{canary_round}",
-            )
+            try:
+                canary_doc = self._canary_step(
+                    experiment_id,
+                    proposal.baseline_release_id,
+                    deployment_bundle,
+                    operation_id=f"{operation_id}:canary:{canary_round}",
+                )
+            except Exception as exc:
+                return self._terminal_failure_result(
+                    cycle_id,
+                    operation_id,
+                    phase="canary",
+                    error=exc,
+                )
             decision = _canary_decision_from_document(canary_doc)
             cycle_doc = self._apply_canary_step(
                 cycle_id,
@@ -276,16 +325,25 @@ class AutonomousIterationWorkflow(DBOSConfiguredInstance):
         proposal = self._proposals.get(proposal_id)
         if proposal is None:
             raise ValueError(f"unknown change proposal: {proposal_id}")
-        attempt = self._engineering.implement(
-            proposal,
-            repository_root=self._repository_root,
-            default_branch=self._default_branch,
-            worktree_root=self._worktree_root,
-            cycle_id=cycle_id,
-            attempt=1,
-            model=model,
-        )
-        return _candidate_to_document(attempt.candidate)
+
+        last_error: CodexProviderError | None = None
+        for attempt_number in range(1, proposal.max_implementation_attempts + 1):
+            try:
+                attempt = self._engineering.implement(
+                    proposal,
+                    repository_root=self._repository_root,
+                    default_branch=self._default_branch,
+                    worktree_root=self._worktree_root,
+                    cycle_id=cycle_id,
+                    attempt=attempt_number,
+                    model=model,
+                )
+                return _candidate_to_document(attempt.candidate)
+            except CodexProviderError as exc:
+                last_error = exc
+        if last_error is None:
+            raise RuntimeError("implementation attempt budget produced no attempt")
+        raise last_error
 
     @DBOS.step(retries_allowed=False)
     def _candidate_ready_step(
@@ -615,6 +673,48 @@ class AutonomousIterationWorkflow(DBOSConfiguredInstance):
             "deployment_id": release.deployment_id,
             "promoted_at": release.promoted_at.isoformat(),
         }
+
+    def _terminal_failure_result(
+        self,
+        cycle_id: str,
+        operation_id: str,
+        *,
+        phase: str,
+        error: Exception,
+    ) -> dict[str, object]:
+        cycle_doc = self._fail_terminal_step(
+            cycle_id,
+            operation_id=f"{operation_id}:failed:{phase}",
+        )
+        return _terminal_result(
+            cycle_doc,
+            f"{phase} failed closed: {type(error).__name__}",
+        )
+
+    @DBOS.step(retries_allowed=False)
+    def _fail_terminal_step(
+        self,
+        cycle_id: str,
+        *,
+        operation_id: str,
+    ) -> dict[str, object]:
+        cycle = self._cycles.get(cycle_id)
+        if cycle.state in {
+            CycleState.COMPLETED,
+            CycleState.REJECTED,
+            CycleState.ROLLED_BACK,
+            CycleState.BLOCKED,
+            CycleState.CANCELLED,
+            CycleState.FAILED_TERMINAL,
+        }:
+            return _cycle_to_document(cycle)
+        updated = self._cycles.transition(
+            cycle.id,
+            CycleState.FAILED_TERMINAL,
+            expected_version=cycle.version,
+            operation_id=operation_id,
+        )
+        return _cycle_to_document(updated)
 
     @DBOS.step(retries_allowed=False)
     def _reject_step(
