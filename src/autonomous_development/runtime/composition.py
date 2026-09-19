@@ -344,6 +344,7 @@ def compose_runtime(settings: RuntimeSettings) -> RuntimeComposition:
         releases=releases,
         contracts=contract_loader,
         runner=runner,
+        traffic=traffic,
     )
     metrics = CanaryMetricsRegistry()
     proxy_app = create_canary_proxy(
