@@ -228,3 +228,76 @@ def test_source_promotion_blocks_if_default_branch_moved(tmp_path: Path) -> None
             candidate_commit=candidate.commit,
             candidate_tree=candidate.tree,
         )
+
+
+def test_source_rollback_restores_autonomous_head_and_replays(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path)
+    provider = GitCliRepository()
+    baseline = provider.verify_baseline(repo, "main")
+    worktree = provider.create_worktree(
+        baseline,
+        cycle_id="cycle-rollback",
+        worktree_root=tmp_path / "worktrees",
+    )
+    (worktree.path / "app.py").write_text("VALUE = 2\n", encoding="utf-8")
+    candidate = provider.commit_candidate(
+        worktree,
+        message="autodev: implement proposal-rollback",
+        codex_thread_id="thread-rollback",
+    )
+    provider.promote_candidate(
+        repo,
+        "main",
+        baseline_commit=baseline.commit,
+        candidate_commit=candidate.commit,
+        candidate_tree=candidate.tree,
+    )
+
+    restored = provider.restore_baseline(
+        repo,
+        "main",
+        baseline_commit=baseline.commit,
+    )
+    replay = provider.restore_baseline(
+        repo,
+        "main",
+        baseline_commit=baseline.commit,
+    )
+
+    assert restored == replay
+    assert restored.commit == baseline.commit
+    assert run(repo, "rev-parse", "HEAD") == baseline.commit
+    assert (repo / "app.py").read_text(encoding="utf-8") == "VALUE = 1\n"
+
+
+def test_cleanup_cycle_removes_worktree_and_branch(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path)
+    provider = GitCliRepository()
+    baseline = provider.verify_baseline(repo, "main")
+    worktree_root = tmp_path / "worktrees"
+    worktree = provider.create_worktree(
+        baseline,
+        cycle_id="cycle-cleanup",
+        worktree_root=worktree_root,
+    )
+    assert worktree.path.exists()
+    assert run(repo, "show-ref", "--verify", "refs/heads/autodev/cycle-cleanup")
+
+    provider.cleanup_cycle(
+        repo,
+        cycle_id="cycle-cleanup",
+        worktree_root=worktree_root,
+    )
+    provider.cleanup_cycle(
+        repo,
+        cycle_id="cycle-cleanup",
+        worktree_root=worktree_root,
+    )
+
+    assert not worktree.path.exists()
+    result = subprocess.run(
+        ["git", "show-ref", "--verify", "--quiet", "refs/heads/autodev/cycle-cleanup"],
+        cwd=repo,
+        check=False,
+    )
+    assert result.returncode != 0
