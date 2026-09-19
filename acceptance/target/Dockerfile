@@ -1,13 +1,12 @@
-FROM cgr.dev/chainguard/python@sha256:dc0368ac6a4792f563e7f523d207f6c5ed17e3d7ed16e7424ac01d47772b096b AS builder
+FROM python:3.12.14-alpine3.24@sha256:c4634f578a412db396771b61b064c6e546c9d6414c7fb5b1b05d5871f1885f7b AS builder
 
 WORKDIR /build
 COPY requirements.txt .
-USER 0
 RUN python -m pip install --no-cache-dir --disable-pip-version-check \
     --target /build/site-packages \
     -r requirements.txt
 
-FROM cgr.dev/chainguard/python@sha256:011e73b4e30e0fe9407a42b82a920b4fa13ebc0bf029a48b714f950df254ca20
+FROM python:3.12.14-alpine3.24@sha256:c4634f578a412db396771b61b064c6e546c9d6414c7fb5b1b05d5871f1885f7b
 
 WORKDIR /app
 COPY --from=builder /build/site-packages /opt/site-packages
