@@ -33,6 +33,7 @@ from autonomous_development.domain.models import (
     ChangeProposal,
     Deployment,
     DevelopmentCycle,
+    ReleasedVersion,
     VerificationCheck,
     VerificationRun,
 )
@@ -47,7 +48,11 @@ from autonomous_development.ports.target_contract import (
     TargetVerificationContract,
     TargetVerificationGateContract,
 )
-from autonomous_development.ports.traffic import TrafficRouteState, TrafficSplit
+from autonomous_development.ports.traffic import (
+    TrafficRouteSnapshot,
+    TrafficRouteState,
+    TrafficSplit,
+)
 from autonomous_development.workflows.autonomous_iteration import (
     AutonomousIterationWorkflow,
 )
@@ -157,6 +162,7 @@ class FakeReleaseRuntime:
 class FakeDeployment:
     def __init__(self) -> None:
         self.calls = 0
+        self.stopped: list[str] = []
 
     def deploy_candidate(
         self,
@@ -184,6 +190,9 @@ class FakeDeployment:
                 observation_refs=("ready:1",),
             ),
         )
+
+    def stop(self, deployment_id: str) -> None:
+        self.stopped.append(deployment_id)
 
 
 class PassingPerformanceGate:
@@ -219,25 +228,58 @@ class FakePerformanceFactory:
 class FakeTraffic:
     def __init__(self) -> None:
         self.applied = 0
+        self.current: TrafficRouteSnapshot | None = None
 
     def apply(self, split: TrafficSplit) -> TrafficRouteState:
         self.applied += 1
-        return TrafficRouteState(
+        state = TrafficRouteState(
             experiment_id=split.experiment_id,
             stage_index=split.stage_index,
             candidate_weight_percent=split.candidate_weight_percent,
             generation=self.applied,
             evidence_ref=f"traffic:{self.applied}",
         )
+        self.current = TrafficRouteSnapshot(
+            experiment_id=split.experiment_id,
+            stage_index=split.stage_index,
+            control_base_url=split.control_base_url,
+            candidate_base_url=split.candidate_base_url,
+            candidate_weight_percent=split.candidate_weight_percent,
+            operation_id=split.operation_id,
+            generation=state.generation,
+            evidence_ref=state.evidence_ref,
+            target_id=split.target_id,
+            control_release_id=split.control_release_id,
+            candidate_deployment_id=split.candidate_deployment_id,
+        )
+        return state
+
+    def read_current(self) -> TrafficRouteSnapshot | None:
+        return self.current
 
     def restore_control(self, **kwargs: object) -> TrafficRouteState:
-        return TrafficRouteState(
+        state = TrafficRouteState(
             experiment_id=str(kwargs["experiment_id"]),
             stage_index=int(kwargs["stage_index"]),
             candidate_weight_percent=0,
             generation=self.applied + 1,
             evidence_ref="traffic:restore",
         )
+        assert self.current is not None
+        self.current = TrafficRouteSnapshot(
+            experiment_id=str(kwargs["experiment_id"]),
+            stage_index=int(kwargs["stage_index"]),
+            control_base_url=str(kwargs["control_base_url"]),
+            candidate_base_url=str(kwargs["candidate_base_url"]),
+            candidate_weight_percent=0,
+            operation_id=str(kwargs["operation_id"]),
+            generation=state.generation,
+            evidence_ref=state.evidence_ref,
+            target_id=self.current.target_id,
+            control_release_id=self.current.control_release_id,
+            candidate_deployment_id=self.current.candidate_deployment_id,
+        )
+        return state
 
 
 class PassingCanaryObserver:
@@ -271,8 +313,11 @@ class PassingCanaryObserver:
 
 
 class FakeSourcePromotion:
-    def __init__(self) -> None:
+    def __init__(self, *, fail_promote: bool = False) -> None:
         self.calls = 0
+        self.fail_promote = fail_promote
+        self.restored: list[str] = []
+        self.cleaned: list[str] = []
 
     def promote(
         self,
@@ -284,7 +329,15 @@ class FakeSourcePromotion:
         self.calls += 1
         assert repository_root.is_absolute()
         assert default_branch == "main"
+        if self.fail_promote:
+            raise RuntimeError("simulated source promotion failure")
         return candidate
+
+    def restore_baseline(self, **kwargs: object) -> None:
+        self.restored.append(str(kwargs["baseline_commit"]))
+
+    def cleanup_cycle(self, **kwargs: object) -> None:
+        self.cleaned.append(str(kwargs["cycle_id"]))
 
 
 def contract() -> TargetContract:
