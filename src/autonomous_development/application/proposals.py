@@ -45,6 +45,7 @@ class ProposalService:
             max_implementation_attempts=objective.mutation_policy.max_implementation_attempts,
             mandatory_gates=mandatory_gates,
             change_intent=_change_intent(diagnosis),
+            max_changed_files=objective.mutation_policy.max_changed_files,
         )
         validate_changed_paths(guard, diagnosis.requested_paths)
 
@@ -61,6 +62,7 @@ class ProposalService:
             max_implementation_attempts=objective.mutation_policy.max_implementation_attempts,
             mandatory_gates=mandatory_gates,
             change_intent=_change_intent(diagnosis),
+            max_changed_files=objective.mutation_policy.max_changed_files,
         )
         return self._repository.add(proposal)
 
