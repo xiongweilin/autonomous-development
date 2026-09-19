@@ -36,3 +36,18 @@ class SourcePromotionService:
         ):
             raise RuntimeError("source promotion changed Codex thread identity")
         return candidate
+
+    def restore_baseline(
+        self,
+        *,
+        repository_root: Path,
+        default_branch: str,
+        baseline_commit: str,
+    ) -> None:
+        restored = self._repository.restore_baseline(
+            repository_root,
+            default_branch,
+            baseline_commit=baseline_commit,
+        )
+        if restored.commit != baseline_commit:
+            raise RuntimeError("source rollback returned a different baseline commit")
