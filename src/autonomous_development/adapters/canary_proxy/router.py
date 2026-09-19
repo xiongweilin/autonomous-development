@@ -136,6 +136,13 @@ def create_canary_proxy(
             if key.lower() not in _HOP_BY_HOP_HEADERS
             and key.lower() != _SESSION_HEADER
         }
+        cookie = headers.get("cookie")
+        if cookie is not None:
+            forwarded_cookie = _without_proxy_session_cookie(cookie)
+            if forwarded_cookie:
+                headers["cookie"] = forwarded_cookie
+            else:
+                headers.pop("cookie", None)
         body = await request.body()
         started = time.monotonic()
         status_code = 502
@@ -190,6 +197,15 @@ def create_canary_proxy(
         return response
 
     return app
+
+
+def _without_proxy_session_cookie(value: str) -> str:
+    parts = tuple(part.strip() for part in value.split(";") if part.strip())
+    return "; ".join(
+        part
+        for part in parts
+        if part.split("=", 1)[0].strip() != _SESSION_COOKIE
+    )
 
 
 def _session_id(request: Request) -> str:
