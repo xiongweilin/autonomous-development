@@ -68,3 +68,16 @@ class ReleaseFinalizationService:
             operation_id=f"{operation_id}:serving",
         )
         return persisted
+
+    def restore_serving(
+        self,
+        target_id: str,
+        release_id: str,
+        *,
+        operation_id: str,
+    ) -> ReleasedVersion:
+        return self._catalog.set_serving(
+            target_id,
+            release_id,
+            operation_id=operation_id,
+        )
