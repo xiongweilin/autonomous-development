@@ -151,3 +151,45 @@ def test_promoted_candidate_becomes_server_owned_serving_release() -> None:
     assert repository.get_serving("target-1") == first
     assert first.source_commit == candidate().candidate_commit
     assert first.artifact_digest == artifact().image_digest
+
+
+def test_restore_serving_reconciles_baseline_pointer() -> None:
+    repository = MemoryReleaseRepository()
+    catalog = ReleaseCatalogService(repository)
+    service = ReleaseFinalizationService(catalog)
+    baseline = ReleasedVersion(
+        id="release-0",
+        target_id="target-1",
+        source_commit="a" * 40,
+        source_tree="a" * 40,
+        artifact_digest="sha256:" + "0" * 64,
+        objective_revision_id="objective-1",
+        deployment_id="deployment-0",
+        promoted_at=datetime.now(UTC),
+    )
+    catalog.register(baseline)
+    promoted = service.finalize(
+        cycle(),
+        candidate(),
+        artifact(),
+        deployment(),
+        release_id="release-1",
+        promoted_at=datetime.now(UTC),
+        operation_id="finalize-1",
+    )
+    assert catalog.serving("target-1") == promoted
+
+    restored = service.restore_serving(
+        "target-1",
+        "release-0",
+        operation_id="rollback-serving-1",
+    )
+    replay = service.restore_serving(
+        "target-1",
+        "release-0",
+        operation_id="rollback-serving-1",
+    )
+
+    assert restored == baseline
+    assert replay == baseline
+    assert catalog.serving("target-1") == baseline
