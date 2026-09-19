@@ -1,7 +1,7 @@
 # V1 Runtime Dependencies and Local Environment
 
 Status: V1 runtime dependency owner  
-Last reviewed: 2026-09-18
+Last reviewed: 2026-09-19
 
 This document separates durable documented environment facts from runtime health. It does not claim that a binary is healthy merely because a package list or RUNBOOK says it should exist.
 
@@ -57,8 +57,10 @@ V1 uses Docker for:
 
 - PostgreSQL;
 - target baseline/candidate containers;
-- Traefik progressive-delivery router;
 - local integration/acceptance stacks.
+
+Progressive delivery itself is implemented by the control plane's loopback FastAPI canary proxy
+plus an atomic local route-state adapter. V1 does not require a separate proxy container.
 
 V1 does not install or manage Docker Desktop.
 
@@ -172,7 +174,8 @@ These are project dependencies, not workstation-global installations.
 - OTLP HTTP exporter;
 - FastAPI/httpx OpenTelemetry instrumentation.
 
-The implementation should lock exact transitive versions in uv.lock. This document owns component choices, not exact patch versions.
+Exact transitive versions are committed in `uv.lock`. CI installs with `uv sync --frozen`
+and verifies the lock with `uv lock --check`; lock drift is a build failure.
 
 ### Development/test
 
@@ -201,20 +204,22 @@ Why:
 
 The image must be pinned by digest in the accepted deployment definition.
 
-### Traefik
+### Built-in canary proxy
 
-Use a Traefik 3.x container for V1 local weighted traffic.
+V1 uses the control plane's FastAPI application as the stable loopback product entrypoint. The
+proxy is mounted at `/product` and reads route state written by
+`AtomicFileTrafficDirector`.
 
 Responsibilities:
 
-- stable local product entrypoint;
-- control/candidate weighted routing;
-- per-service metrics;
-- rapid traffic rollback.
+- deterministic sticky control/candidate assignment by server-owned session identity;
+- server-generated request references;
+- durable request-to-experiment/release/deployment attribution in PostgreSQL;
+- per-route-generation request/error/latency measurements;
+- fail-closed behavior when route attribution cannot be persisted;
+- explicit control restoration during rollback.
 
-The image must be pinned by digest in the accepted deployment definition.
-
-Traefik is an adapter implementation. The domain depends only on TrafficProvider.
+No Traefik container is required by the implemented V1 runtime.
 
 ## 6. Tools V1 deliberately does not require
 
@@ -294,7 +299,7 @@ Based on the durable workstation baseline, **V1 should not require a new host-le
 Implementation needs:
 
 1. new Python project dependencies resolved by uv;
-2. PostgreSQL and Traefik Docker images;
+2. a PostgreSQL runtime and the target product's baseline/candidate Docker images;
 3. project-specific GitHub/Sonar configuration where enabled.
 
 Before accepting that conclusion at deployment time, run the live readiness probes. If a required managed tool is missing, restore it through pc-dotfiles/Scoop rather than adding an ad-hoc installer to this repository.
