@@ -12,6 +12,20 @@ permissions:
   contents: read
 
 jobs:
+  original-chainguard-size:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: feat/v1-operator-feishu-integration
+          persist-credentials: false
+      - name: Build original Chainguard acceptance image
+        run: docker build --pull=false -t acceptance-original:chainguard acceptance/target
+      - name: Report original final image size
+        run: |
+          docker image inspect acceptance-original:chainguard \
+            --format 'original_size_bytes={{.Size}} id={{.Id}}'
+
   build-smoke-scan:
     runs-on: ubuntu-24.04
     steps:
