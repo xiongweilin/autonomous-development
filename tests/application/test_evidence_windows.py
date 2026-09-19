@@ -1,7 +1,5 @@
 from datetime import UTC, datetime, timedelta
 
-import pytest
-
 from autonomous_development.application.evidence_windows import EvidenceWindowService
 from autonomous_development.application.release_catalog import ReleaseCatalogService
 from autonomous_development.domain.enums import FeedbackKind
