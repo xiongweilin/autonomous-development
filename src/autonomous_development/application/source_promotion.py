@@ -37,6 +37,19 @@ class SourcePromotionService:
             raise RuntimeError("source promotion changed Codex thread identity")
         return candidate
 
+    def cleanup_cycle(
+        self,
+        *,
+        repository_root: Path,
+        worktree_root: Path,
+        cycle_id: str,
+    ) -> None:
+        self._repository.cleanup_cycle(
+            repository_root,
+            cycle_id=cycle_id,
+            worktree_root=worktree_root,
+        )
+
     def restore_baseline(
         self,
         *,
