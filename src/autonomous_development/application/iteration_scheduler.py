@@ -109,6 +109,7 @@ class FeedbackIterationSchedulerService:
         candidates = self._feedback.list_attributable(
             target_id,
             serving.id,
+            deployment_id=serving.deployment_id,
             opened_at=serving.promoted_at,
             closed_at=eligible_until,
         )
