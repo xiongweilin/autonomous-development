@@ -111,6 +111,34 @@ async def test_proxy_keeps_one_session_on_one_arm() -> None:
 
 
 @pytest.mark.asyncio
+async def test_proxy_preserves_product_cookies_but_strips_proxy_session_cookie() -> None:
+    observed_cookie: list[str] = []
+
+    async def upstream(request: httpx.Request) -> httpx.Response:
+        observed_cookie.append(request.headers.get("cookie", ""))
+        return httpx.Response(200, content=b"ok", request=request)
+
+    app = create_canary_proxy(
+        FakeRouteReader(route(0)),
+        CanaryMetricsRegistry(),
+        upstream_transport=httpx.MockTransport(upstream),
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://proxy.local",
+    ) as client:
+        response = await client.get(
+            "/work",
+            headers={
+                "cookie": "product_session=abc; autodev_session=route-cookie",
+            },
+        )
+
+    assert response.status_code == 200
+    assert observed_cookie == ["product_session=abc"]
+
+
+@pytest.mark.asyncio
 async def test_proxy_persists_candidate_request_attribution() -> None:
     async def upstream(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, content=b"ok", request=request)
