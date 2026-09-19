@@ -315,8 +315,9 @@ If soak observation itself cannot produce trustworthy evidence, V1 performs the 
 rollback.
 
 On successful soak completion, the previous baseline container and terminal worktree/branch are
-reclaimed. Pre-promotion terminal failures/rejections also reclaim candidate resources on a
-best-effort, replay-safe path.
+reclaimed. Pre-promotion failures/rejections complete replay-safe candidate cleanup before the
+terminal cycle transition is committed; cleanup failure therefore remains recoverable instead of
+being hidden behind a terminal state.
 
 ## 11. Dependency and CI reproducibility
 
