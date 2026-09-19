@@ -516,3 +516,100 @@ def test_dbos_iteration_promotes_and_replay_does_not_repeat_effects(tmp_path: Pa
     finally:
         DBOS.destroy(workflow_completion_timeout_sec=5)
         engine.dispose()
+
+
+def test_source_promotion_failure_compensates_to_baseline(tmp_path: Path) -> None:
+    app_database = tmp_path / "rollback-app.db"
+    system_database = tmp_path / "rollback-dbos.db"
+    engine = create_engine(f"sqlite+pysqlite:///{app_database}")
+    metadata.create_all(engine)
+
+    cycles = CycleService(SqlCycleRepository(engine))
+    cycles.create(
+        DevelopmentCycle(
+            id="cycle-1",
+            target_id="target-1",
+            objective_revision_id="objective-1",
+            baseline_release_id="release-0",
+            state=CycleState.CHANGE_PROPOSED,
+            change_proposal_id="proposal-1",
+        )
+    )
+    proposal_repository = SqlChangeProposalRepository(engine)
+    proposals = ProposalService(proposal_repository)
+    proposal_repository.add(proposal())
+
+    experiments = ExperimentService(SqlExperimentRepository(engine))
+    traffic = FakeTraffic()
+    observer = PassingCanaryObserver()
+    canary = CanaryService(traffic, observer, experiments)
+    releases = ReleaseService(
+        cycles,
+        experiments,
+        SqlReleaseDecisionRepository(engine),
+    )
+    catalog = ReleaseCatalogService(SqlReleasedVersionRepository(engine))
+    catalog.register(baseline_release())
+    catalog.set_serving("target-1", "release-0", operation_id="serve-baseline")
+    finalization = ReleaseFinalizationService(catalog)
+    source_promotion = FakeSourcePromotion(fail_promote=True)
+
+    worktree = (tmp_path / "rollback-worktree").resolve()
+    worktree.mkdir()
+    engineering = FakeEngineering(worktree)
+    verification = FakeVerification()
+    build = FakeBuild()
+    deployment = FakeDeployment()
+    release_runtime = FakeReleaseRuntime()
+    performance = FakePerformanceFactory()
+
+    config: DBOSConfig = {
+        "name": "autonomous-iteration-rollback-test",
+        "application_version": "0.1.0",
+        "system_database_url": f"sqlite:///{system_database}",
+    }
+    DBOS(config=config)
+    workflow = AutonomousIterationWorkflow(
+        cycles=cycles,
+        proposals=proposals,
+        engineering=engineering,  # type: ignore[arg-type]
+        verification=verification,  # type: ignore[arg-type]
+        build=build,  # type: ignore[arg-type]
+        deployment=deployment,  # type: ignore[arg-type]
+        performance_gates=performance,
+        experiments=experiments,
+        canary=canary,
+        releases=releases,
+        finalization=finalization,
+        release_runtime=release_runtime,  # type: ignore[arg-type]
+        source_promotion=source_promotion,  # type: ignore[arg-type]
+        contract=contract(),
+        repository_root=tmp_path.resolve(),
+        worktree_root=(tmp_path / "rollback-worktrees").resolve(),
+        default_branch="main",
+        canary_hold_sleep_seconds=0.001,
+        config_name="test-autonomous-iteration-rollback",
+    )
+    DBOS.launch()
+    try:
+        with SetWorkflowID("cycle-1:source-promotion-failure"):
+            result = workflow.run(
+                "cycle-1",
+                "proposal-1",
+                "iteration-run-rollback",
+            )
+
+        assert result["status"] == CycleState.ROLLED_BACK.value
+        assert cycles.get("cycle-1").state is CycleState.ROLLED_BACK
+        serving = catalog.serving("target-1")
+        assert serving is not None
+        assert serving.id == "release-0"
+        assert traffic.current is not None
+        assert traffic.current.candidate_weight_percent == 0
+        assert source_promotion.calls == 1
+        assert source_promotion.restored == ["a" * 40]
+        assert source_promotion.cleaned == ["cycle-1"]
+        assert deployment.stopped == ["cycle-1-candidate"]
+    finally:
+        DBOS.destroy(workflow_completion_timeout_sec=5)
+        engine.dispose()
