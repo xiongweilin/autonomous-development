@@ -564,7 +564,7 @@ def test_source_promotion_failure_compensates_to_baseline(tmp_path: Path) -> Non
     performance = FakePerformanceFactory()
 
     config: DBOSConfig = {
-        "name": "autonomous-iteration-rollback-test",
+        "name": "autodev-rollback-test",
         "application_version": "0.1.0",
         "system_database_url": f"sqlite:///{system_database}",
     }
