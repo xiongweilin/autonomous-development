@@ -40,24 +40,19 @@ jobs:
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
           python-version: "3.12"
+          version: "0.12.17"
       - name: Sync
-        run: uv sync --extra dev
+        run: uv sync --frozen --extra dev
       - name: Ruff
         run: uv run ruff check .
+      - name: Verify lock is current
+        run: uv lock --check
       - name: Mypy
         run: uv run mypy src --no-incremental --show-error-codes
       - name: Architecture
         run: uv run lint-imports
       - name: Tests
         run: uv run pytest -m "not integration" --cov=src/autonomous_development --cov-report=term-missing --cov-fail-under=85
-      - name: Generate lock artifact
-        run: uv lock
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: uv-lock
-          path: uv.lock
-          if-no-files-found: error
-
   postgres-integration:
     runs-on: ubuntu-24.04
     services:
@@ -84,8 +79,11 @@ jobs:
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
           python-version: "3.12"
+          version: "0.12.17"
       - name: Sync
-        run: uv sync --extra dev
+        run: uv sync --frozen --extra dev
+      - name: Verify lock is current
+        run: uv lock --check
       - name: Migration roundtrip
         run: |
           uv run alembic upgrade head
