@@ -19,6 +19,7 @@ from autonomous_development.adapters.postgres.target_registry import (
 )
 from autonomous_development.adapters.process.subprocess_runner import SubprocessRunner
 from autonomous_development.adapters.target_contract.toml import TomlTargetContractLoader
+from autonomous_development.adapters.traffic.file import AtomicFileTrafficDirector
 from autonomous_development.application.release_catalog import ReleaseCatalogService
 from autonomous_development.application.target_registry import TargetRegistryService
 from autonomous_development.domain.enums import DeploymentState
@@ -29,6 +30,7 @@ from autonomous_development.domain.models import (
     ReleasedVersion,
 )
 from autonomous_development.ports.deployment import DeploymentSpec
+from autonomous_development.ports.traffic import TrafficSplit
 from autonomous_development.runtime.config import RuntimeSettings
 
 
@@ -148,9 +150,10 @@ def bootstrap_runtime(settings: RuntimeSettings, manifest_path: Path) -> dict[st
         current_release_id=release.id,
     )
 
+    evidence_store = LocalEvidenceStore(settings.evidence_root)
     deployment_provider = DockerDeploymentProvider(
         runner,
-        LocalEvidenceStore(settings.evidence_root),
+        evidence_store,
     )
     deployment_spec = DeploymentSpec(
         deployment_id=release.deployment_id,
@@ -160,9 +163,7 @@ def bootstrap_runtime(settings: RuntimeSettings, manifest_path: Path) -> dict[st
         container_port=contract.deployment.container_port,
     )
     runtime = deployment_provider.ensure(deployment_spec)
-    observed = HttpDeploymentObserver(
-        LocalEvidenceStore(settings.evidence_root)
-    ).wait_ready(
+    observed = HttpDeploymentObserver(evidence_store).wait_ready(
         deployment_spec,
         runtime,
         health_path=contract.deployment.health_path,
@@ -195,6 +196,21 @@ def bootstrap_runtime(settings: RuntimeSettings, manifest_path: Path) -> dict[st
         )
     finally:
         engine.dispose()
+
+    traffic = AtomicFileTrafficDirector(settings.traffic_state_root, evidence_store)
+    traffic.apply(
+        TrafficSplit(
+            experiment_id=f"bootstrap-{release.id}",
+            stage_index=0,
+            control_base_url=runtime.base_url,
+            candidate_base_url=runtime.base_url,
+            candidate_weight_percent=0,
+            operation_id=f"bootstrap:{target.id}:{release.id}:traffic",
+            target_id=target.id,
+            control_release_id=release.id,
+            candidate_deployment_id=release.deployment_id,
+        )
+    )
 
     return {
         "status": "bootstrapped",
