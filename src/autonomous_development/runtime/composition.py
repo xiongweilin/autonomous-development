@@ -29,6 +29,9 @@ from autonomous_development.adapters.postgres.feedback_triggers import (
     SqlFeedbackTriggerRepository,
 )
 from autonomous_development.adapters.postgres.proposals import SqlChangeProposalRepository
+from autonomous_development.adapters.postgres.request_attributions import (
+    SqlRequestAttributionRepository,
+)
 from autonomous_development.adapters.postgres.release_decisions import (
     SqlReleaseDecisionRepository,
 )
@@ -150,13 +153,18 @@ def compose_runtime(settings: RuntimeSettings) -> RuntimeComposition:
     cycle_repository = SqlCycleRepository(engine)
     release_repository = SqlReleasedVersionRepository(engine)
     feedback_repository = SqlFeedbackRepository(engine)
+    attribution_repository = SqlRequestAttributionRepository(engine)
     target_repository = SqlTargetRepository(engine)
     objective_repository = SqlObjectiveRepository(engine)
 
     cycles = CycleService(cycle_repository)
     releases = ReleaseCatalogService(release_repository)
     targets = TargetRegistryService(target_repository, objective_repository)
-    feedback = FeedbackService(releases, feedback_repository)
+    feedback = FeedbackService(
+        releases,
+        feedback_repository,
+        attribution_repository,
+    )
 
     registered = targets.list_targets()
     if len(registered) != 1:
@@ -334,7 +342,11 @@ def compose_runtime(settings: RuntimeSettings) -> RuntimeComposition:
         runner=runner,
     )
     metrics = CanaryMetricsRegistry()
-    proxy_app = create_canary_proxy(traffic, metrics)
+    proxy_app = create_canary_proxy(
+        traffic,
+        metrics,
+        attributions=attribution_repository,
+    )
     app = create_control_app(
         feedback,
         readiness,
