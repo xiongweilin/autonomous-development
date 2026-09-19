@@ -8,7 +8,7 @@ from autonomous_development.ports.persistence import (
     EvidenceWindowRepository,
     FeedbackRepository,
 )
-from autonomous_development.ports.telemetry import TelemetryProvider
+from autonomous_development.ports.telemetry import TelemetryEvidence, TelemetryProvider
 
 
 class EvidenceWindowService:
@@ -56,11 +56,6 @@ class EvidenceWindowService:
         serving = self._releases.serving(target_id)
         if serving is None:
             raise ValueError(f"target {target_id} has no serving release")
-        if opened_at < serving.promoted_at:
-            raise ValueError(
-                "evidence window predates the current serving release and may mix releases"
-            )
-
         feedback = (
             self._explicit_feedback(
                 feedback_ids,
@@ -79,11 +74,19 @@ class EvidenceWindowService:
                 closed_at=closed_at,
             )
         )
-        telemetry = self._telemetry.collect(
-            target_id=target_id,
-            release_id=serving.id,
-            opened_at=opened_at,
-            closed_at=closed_at,
+        telemetry_opened_at = max(opened_at, serving.promoted_at)
+        telemetry = (
+            TelemetryEvidence(
+                evidence_refs=(),
+                missing_metrics=("serving-release-not-yet-promoted",),
+            )
+            if closed_at < telemetry_opened_at
+            else self._telemetry.collect(
+                target_id=target_id,
+                release_id=serving.id,
+                opened_at=telemetry_opened_at,
+                closed_at=closed_at,
+            )
         )
         window = EvidenceWindow(
             id=window_id,
