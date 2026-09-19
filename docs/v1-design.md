@@ -1,9 +1,9 @@
 # V1 Design — Autonomous Development Closed Loop
 
-Status: design freeze candidate  
+Status: implementation acceptance candidate  
 Scope: V1 only  
 Owner: this document  
-Last reviewed: 2026-09-18
+Last reviewed: 2026-09-19
 
 This document is the canonical V1 architecture and lifecycle definition. README is navigation only. Runtime/tool facts belong in v1-runtime-dependencies.md. Research history belongs in v1-research-basis.md.
 
@@ -615,86 +615,83 @@ The orchestrator, not Codex, performs branch creation, final commits/push, CI ob
 Each change runs in a dedicated git worktree:
 
 ~~~text
-target checkout
-    main/
-    .autodev/worktrees/<cycle-id>/
+target checkout/
+    <default branch>
+state_root/
+    worktrees/<cycle-id>/
 ~~~
 
-Workflow:
+Implemented V1 workflow:
 
-1. fetch and verify remote default branch;
-2. record exact baseline commit/tree;
-3. create branch autodev/<cycle-id>;
-4. create isolated worktree;
-5. run Codex only in that worktree;
-6. verify changed paths against mutation scope;
-7. run local gates;
-8. create candidate commit;
-9. push branch;
-10. open/update PR;
-11. observe GitHub checks;
-12. build candidate artifact from the candidate tree;
-13. after promotion, merge the reviewed source history and bind release metadata to both candidate and merge identities;
-14. remove worktree only after terminal closure.
+1. verify the local default-branch checkout is clean and record its exact commit/tree;
+2. create branch autodev/<cycle-id> and an isolated worktree from that baseline;
+3. run Codex only inside the worktree;
+4. mechanically enforce allowed/forbidden paths and the maximum changed-file count;
+5. create exactly one candidate commit with durable Codex-thread provenance;
+6. run deterministic verification, build, deployment, performance and canary gates from the recorded candidate identity;
+7. only after a deterministic promotion decision, fast-forward the local default branch to the exact candidate commit;
+8. keep the previous serving release and source baseline rollback-addressable through post-promotion soak;
+9. on soak rollback, restore traffic, serving release and the local default branch to the exact baseline, stop the candidate deployment and clean the worktree/branch;
+10. on terminal success or rejection, reclaim terminal worktree/branch and no-longer-needed containers.
+
+The V1 autonomous runtime does not require a remote push, pull request or GitHub merge to execute
+a local development cycle. GitHub Actions remain the repository's own CI/security surface.
 
 No development cycle edits the primary checkout directly.
 
 ## 10. Target contract
 
-A target repository opts in through a versioned file such as autonomous-development.yaml.
+A target repository opts in through autonomous-development.toml. The file describes integration
+facts, not the human-owned product objective or mutation authorization.
 
-This file describes integration facts, not product goals.
+Implemented V1 contract shape:
 
-V1 contract sections:
+~~~toml
+schema_version = 1
+target_id = "example-agent"
 
-~~~yaml
-schema_version: 1
-target:
-  id: example-agent
-  default_branch: main
+[build]
+dockerfile = "Dockerfile"
+dependency_locks = ["uv.lock"]
 
-mutation:
-  allowed_paths: [...]
-  forbidden_paths: [...]
-  dependency_policy: ...
+[verification]
+[[verification.gates]]
+id = "tests"
+command = ["uv", "run", "pytest"]
+timeout_seconds = 900
 
-verification:
-  commands:
-    - ...
-  coverage:
-    ...
-  architecture:
-    ...
-  performance:
-    ...
+[deployment]
+container_port = 8000
+health_path = "/health"
+readiness_path = "/ready"
+startup_timeout_seconds = 60
 
-build:
-  dockerfile: Dockerfile
-  context: .
+[performance]
+script_path = "tests/performance/smoke.js"
+required_threshold_metrics = ["http_req_failed"]
+timeout_seconds = 900
 
-deployment:
-  health_url: /health
-  readiness_url: /ready
-  metrics_url: /metrics
+[canary]
+max_candidate_error_rate = 0.02
+max_error_rate_delta = 0.01
+max_candidate_p95_latency_ms = 250.0
+max_p95_latency_ratio = 1.25
 
-canary:
-  stages:
-    - weight: 10
-      min_duration: ...
-      min_requests: ...
-    - weight: 50
-      ...
-    - weight: 100
-      ...
-  rollback_rules: ...
-
-feedback:
-  attribution_key: request_id
+[[canary.stages]]
+weight_percent = 10
+min_duration_seconds = 60
+min_requests = 100
 ~~~
 
-The target contract is validated before a target can be registered.
+Registration hashes the raw contract bytes with SHA-256 and stores that revision in the target
+registry. Runtime composition, readiness and autonomous cycle preparation fail closed when the
+loaded contract revision differs from the registered revision.
 
-V1 does not execute arbitrary shell text from an untrusted repository without an explicit target registration/allowlist step.
+Mutation policy is separately human-owned in ProductObjectiveRevision/DevelopmentTarget.
+autonomous-development.toml is system-owned and cannot be modified by an autonomous candidate.
+
+V1 executes target verification commands only after explicit target bootstrap/registration and
+within the registered contract and mutation boundaries.
 
 ## 11. Quality gates
 
@@ -717,7 +714,8 @@ Must prove:
 Must prove:
 
 - changed paths are within scope;
-- forbidden files untouched;
+- the actual changed-file count is within the human-owned max_changed_files budget;
+- autonomous-development.toml and other forbidden files are untouched;
 - generated/vendor/binary changes obey policy;
 - dependency changes obey dependency policy;
 - candidate commit/tree are recorded;
@@ -759,7 +757,7 @@ Required:
 - OSV-Scanner source/dependency scan;
 - SBOM generation with Syft for the candidate image;
 - image vulnerability scan with Grype;
-- dependency lockfile consistency;
+- committed dependency lockfile consistency with frozen installation;
 - pinned GitHub Actions by full commit SHA.
 
 GitHub dependency review is enabled where supported and used as an additional PR gate.
@@ -865,34 +863,37 @@ A future ExperimentAnalyzer port may add sequential statistics or Bayesian analy
 
 ## 13. Feedback loop
 
-Feedback enters through a local HTTP API and optional adapters.
-
-Minimum endpoints:
+Feedback enters through the local endpoint:
 
 ~~~text
-POST /v1/feedback
-POST /v1/targets
-POST /v1/targets/{id}/requirements
-POST /v1/targets/{id}/cycles
-GET  /v1/targets/{id}/status
-GET  /v1/cycles/{id}
-POST /v1/cycles/{id}/cancel
+POST /v1/targets/{target_id}/feedback
 ~~~
+
+Product requests are served through the loopback /product proxy. For each routed request the proxy
+chooses a sticky control/candidate arm from a server-owned session identity, generates a
+server-owned request reference and persists request-to-experiment/release/deployment attribution
+before forwarding the request.
 
 Feedback processing:
 
 ~~~text
-raw feedback
- -> validate
- -> bind request/session
- -> bind product/deployment version
- -> classify explicit vs inferred signal
- -> persist immutable event
- -> include in next EvidenceWindow
+product request
+ -> sticky control/candidate route
+ -> persist server-owned request attribution
+ -> return request reference
+ -> validate submitted feedback
+ -> resolve request reference to actual release/deployment/experiment
+ -> persist immutable UserFeedback
+ -> include attributable feedback in the next EvidenceWindow
  -> trigger diagnosis when policy threshold is met
 ~~~
 
-Free-text feedback is evidence, not an executable prompt. It is never passed directly to Codex as trusted instruction.
+A control request can be bound directly to a ReleasedVersion. A pre-promotion candidate request is
+bound to its candidate deployment and experiment even though no release exists yet. After that
+deployment is promoted, evidence queries can include the earlier feedback by deployment identity.
+
+Client-reported release/deployment IDs are corroborating claims only and are rejected when they
+conflict with server-owned attribution. Free-text feedback is evidence, not an executable prompt.
 
 The EvidenceBundle sent to Codex clearly separates:
 
@@ -953,36 +954,38 @@ A provider outage may delay the loop; it must not cause a false promotion.
 
 ## 16. V1 adapters
 
-Required concrete adapters:
+Implemented concrete runtime adapters:
 
 ### CodexProvider
-Primary: local Codex App Server JSON-RPC.
+Local Codex App Server JSON-RPC with bounded workspace read/write policy and durable thread journal.
 
 ### RepositoryProvider
-Git CLI + git worktree.
+Git CLI + git worktree, including candidate provenance, source fast-forward, rollback and terminal
+cleanup.
 
-### CIProvider
-GitHub through gh CLI / GitHub API-compatible semantics.
+### Quality gates
+Registered command gates plus k6 performance execution.
 
 ### BuildProvider
-Docker CLI / BuildKit.
+Docker CLI / BuildKit with source-tree identity, Syft SBOM and Grype image scanning.
 
 ### DeploymentProvider
-Docker Compose/local Docker.
+Local Docker CLI with deterministic deployment identity, reconciliation and loopback port binding.
 
 ### TrafficProvider
-Traefik weighted services in a local container.
+AtomicFileTrafficDirector plus the built-in FastAPI loopback canary proxy and ProxyCanaryObserver.
 
 ### TelemetryProvider
-Prometheus query API + OpenTelemetry emission.
+Prometheus query API with immutable local evidence records.
 
 ### FeedbackProvider
-Local FastAPI ingestion backed by PostgreSQL.
+Local FastAPI ingestion backed by PostgreSQL request attribution and UserFeedback persistence.
 
-### SecretResolver
-Existing host credential-broker boundary. The application stores locators, never secret values.
+### Persistence
+PostgreSQL repositories plus DBOS PostgreSQL system state.
 
-All adapters must have fake/in-memory implementations for deterministic tests.
+GitHub Actions is the CI/security surface for this repository, but the V1 local autonomous cycle
+does not depend on a GitHub CI provider or remote source mutation.
 
 ## 17. Data storage
 
@@ -999,48 +1002,48 @@ All critical migration tests include PostgreSQL upgrade/downgrade smoke.
 
 ## 18. Local deployment topology
 
-Planned topology:
+Implemented topology:
 
 ~~~text
 Windows host
 |
 +-- Codex CLI / App Server
 |
-+-- autonomous-development API/worker
++-- autonomous-development API/worker :8765
 |      |
-|      +-- PostgreSQL
+|      +-- /product built-in canary proxy
+|      +-- PostgreSQL application state
+|      +-- DBOS PostgreSQL system state
 |      +-- Docker CLI
-|      +-- git / gh
+|      +-- git CLI
+|      +-- k6 / Syft / Grype
 |
-+-- target baseline container(s)
-+-- target candidate container(s)
-+-- Traefik experiment router
++-- target baseline container(s) on loopback ports
++-- target candidate container(s) on loopback ports
 |
-+-- existing Observability stack
-       Prometheus
-       Alertmanager
-       Grafana
-       Loki
-       Tempo
-       OTel Collector :4317/:4318
++-- existing observability stack
+       Prometheus :19090
+       OTel / Grafana / Loki / Tempo as host-owned services where configured
 ~~~
 
-Autonomous Development connects to the existing OTel Collector and Prometheus through adapters. It does not redefine or own that infrastructure.
-
-The target baseline/candidate stack uses an isolated Compose project/network to avoid colliding with existing local services.
+The control plane does not require Traefik or Docker Compose for progressive delivery. Traffic
+routing state is written atomically by the orchestrator and consumed by the mounted loopback
+FastAPI proxy. Prometheus remains externally owned and is queried over loopback.
 
 ## 19. Security boundaries
 
 - Codex receives no production/deployment secrets.
-- Codex workspace is limited to its worktree.
-- Codex implementation mode defaults to network disabled.
+- Codex repository reads are restricted to the bounded worktree plus platform-default read roots;
+  implementation writes are restricted to that worktree.
+- Codex implementation mode has network access disabled.
 - Host-global package installation is forbidden.
-- Deployment credentials are held by the orchestrator/provider boundary.
-- Secrets are referenced by locator and injected in-memory/process scope only when needed.
-- User feedback is untrusted data.
-- Target repository instructions are untrusted relative to system policy and cannot widen runtime authority.
+- Deployment credentials and Docker authority remain on the orchestrator/provider side.
+- User feedback and target repository instructions are untrusted data and cannot widen policy.
+- autonomous-development.toml is system-owned and excluded from autonomous mutation.
+- Canary request attribution is persisted before forwarding when attribution is enabled; failure
+  to persist attribution fails the proxy request closed.
 - Docker socket access is not delegated to Codex as release authority.
-- Every external command has timeout, bounded output capture and redaction.
+- Every external command has a timeout and bounded execution contract.
 - Public network exposure is not required for V1.
 
 ## 20. V1 development phases
@@ -1122,7 +1125,7 @@ Exit criteria:
 
 ### Phase 6 — Progressive delivery
 
-Add Traefik weighted routing, stage ledger, Prometheus queries and rollback.
+Add built-in weighted loopback routing, stage ledger, Prometheus queries and rollback.
 
 Exit criteria:
 
@@ -1137,7 +1140,7 @@ Add feedback ingestion, attribution, evidence windows, Codex diagnosis and subse
 
 Exit criteria:
 
-- user feedback is bound to the serving version;
+- user feedback is bound to the server-observed routed release/deployment, including pre-promotion candidate traffic;
 - a seeded product defect causes feedback/telemetry;
 - system diagnoses, creates a bounded change, implements, verifies, canaries and promotes without a human choosing the code change;
 - malicious feedback text cannot escape the objective or mutation boundary.
@@ -1195,31 +1198,39 @@ V1 is complete only when all statements below are true:
 10. The previous good release remains a real rollback target until closure.
 11. Code quality architecture rules are machine-enforced.
 12. Performance regression is a blocking gate.
-13. User feedback is version-attributed and treated as untrusted evidence.
+13. User feedback is server-attributed to the actual routed release/deployment/experiment and treated as untrusted evidence.
 14. The entire demonstration can be repeated from a clean checkout and declared runtime dependencies.
 
 If any of these are missing, the system is an automation prototype, not the V1 autonomous-development closed loop.
 
 ## 22. Frozen decisions for V1
 
-The following choices are frozen for V1 unless implementation proves a concrete contradiction:
+The following choices are frozen for the implemented V1:
 
 - language: Python 3.12+;
-- dependency manager: uv;
+- dependency manager: uv with committed uv.lock and frozen CI sync;
 - durable workflow: DBOS;
 - durable store: PostgreSQL in local deployment;
 - engineering executor: installed Codex through App Server;
 - source isolation: git worktree;
-- remote/CI surface: GitHub;
+- source authority: local clean default branch with exact commit/tree identity;
+- repository CI/security surface: GitHub Actions;
 - artifact: OCI/Docker image by digest;
-- local runtime: Docker Desktop / Compose;
-- progressive traffic: Traefik weighted services;
+- local runtime: Docker Desktop / Docker CLI;
+- progressive traffic: built-in loopback FastAPI canary proxy + atomic route state;
 - performance: k6;
-- telemetry: OpenTelemetry + Prometheus;
-- quality: Ruff, mypy, pytest, Hypothesis, Import Linter, Sonar where configured;
-- security: Gitleaks, OSV-Scanner, Syft, Grype, actionlint, zizmor;
-- deployment scope: one workstation, bounded target products;
+- telemetry evidence: Prometheus query API;
+- quality: Ruff, mypy, pytest, Hypothesis and Import Linter plus target-owned gates;
+- security: Gitleaks, OSV-Scanner, Syft, Grype, actionlint and zizmor;
+- deployment scope: one workstation, one registered bounded target at a time;
 - promotion: deterministic multi-gate release controller;
 - no direct dependency on prior personal agent repositories.
 
-A change to a frozen decision requires a documented implementation-blocking fact, a replacement analysis and an explicit V1 design revision before dependent implementation proceeds.
+Implementation revision note: the original design named Traefik and a remote GitHub source/PR path.
+The concrete V1 only needs local loopback progressive delivery and server-owned request
+attribution, and its source lifecycle is deliberately local-first. The built-in proxy and local
+fast-forward/rollback model reduce external state without changing the domain semantics of
+Experiment, ReleaseDecision or rollback. GitHub remains the repository CI/security surface.
+
+A future change to a frozen decision requires a concrete implementation-blocking fact, replacement
+analysis and an explicit design revision before dependent implementation proceeds.
