@@ -315,6 +315,7 @@ class AutonomousIterationWorkflow(DBOSConfiguredInstance):
         return {
             "cycle": promotion_doc,
             "release": release_doc,
+            "candidate": candidate_doc,
             "verification": full_verification_doc,
             "status": "promoted",
         }

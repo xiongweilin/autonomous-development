@@ -9,14 +9,18 @@ from autonomous_development.domain.enums import CanaryDecisionKind, CycleState
 from autonomous_development.domain.models import (
     ChangeProposal,
     DevelopmentCycle,
+    DevelopmentRequest,
     DevelopmentTarget,
     Diagnosis,
     EvidenceWindow,
     Experiment,
+    HumanIntervention,
+    OperatorEvent,
     ProductObjectiveRevision,
     ReleaseDecision,
     ReleasedVersion,
     RequestAttribution,
+    RequirementAnalysis,
     UserFeedback,
 )
 from autonomous_development.domain.soak import PostPromotionSoakDecision
@@ -128,7 +132,6 @@ class ExperimentRepository(Protocol):
     ) -> ExperimentStageReceipt: ...
 
 
-
 class ReleaseDecisionRepository(Protocol):
     def get(self, operation_id: str) -> ReleaseDecisionReceipt | None: ...
 
@@ -137,7 +140,6 @@ class ReleaseDecisionRepository(Protocol):
         operation_id: str,
         decision: ReleaseDecision,
     ) -> ReleaseDecisionReceipt: ...
-
 
 
 class ReleasedVersionRepository(Protocol):
@@ -184,7 +186,6 @@ class EvidenceWindowRepository(Protocol):
     def get(self, window_id: str) -> EvidenceWindow | None: ...
 
 
-
 class DiagnosisRepository(Protocol):
     def add(self, diagnosis: Diagnosis) -> Diagnosis: ...
 
@@ -197,7 +198,6 @@ class ChangeProposalRepository(Protocol):
     def get(self, proposal_id: str) -> ChangeProposal | None: ...
 
 
-
 class SoakDecisionRepository(Protocol):
     def get(self, operation_id: str) -> SoakDecisionReceipt | None: ...
 
@@ -207,7 +207,6 @@ class SoakDecisionRepository(Protocol):
         cycle_id: str,
         decision: PostPromotionSoakDecision,
     ) -> SoakDecisionReceipt: ...
-
 
 
 class TargetRepository(Protocol):
@@ -223,6 +222,40 @@ class ObjectiveRepository(Protocol):
 
     def get(self, objective_id: str) -> ProductObjectiveRevision | None: ...
 
+
+class OperatorRepository(Protocol):
+    def add_request(self, request: DevelopmentRequest) -> DevelopmentRequest: ...
+
+    def get_request(self, request_id: str) -> DevelopmentRequest | None: ...
+
+    def update_request(self, request: DevelopmentRequest) -> DevelopmentRequest: ...
+
+    def add_analysis(self, analysis: RequirementAnalysis) -> RequirementAnalysis: ...
+
+    def get_analysis(self, request_id: str) -> RequirementAnalysis | None: ...
+
+    def add_intervention(self, intervention: HumanIntervention) -> HumanIntervention: ...
+
+    def get_intervention(self, intervention_id: str) -> HumanIntervention | None: ...
+
+    def respond_intervention(
+        self,
+        intervention_id: str,
+        response: str,
+        responded_at: datetime,
+    ) -> HumanIntervention: ...
+
+    def append_event(self, event: OperatorEvent) -> OperatorEvent: ...
+
+    def list_events(self, *, after: int, limit: int) -> tuple[OperatorEvent, ...]: ...
+
+    def acknowledge_event(self, event_id: str, acknowledged_at: datetime) -> OperatorEvent: ...
+
+    def pending_event_count(self) -> int: ...
+
+    def pending_intervention_count(self) -> int: ...
+
+    def latest_event_sequence(self) -> int: ...
 
 
 class FeedbackTriggerRepository(Protocol):

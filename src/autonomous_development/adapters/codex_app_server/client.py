@@ -8,6 +8,7 @@ import subprocess
 import threading
 import time
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,13 @@ from autonomous_development.ports.codex import (
     CodexTurnRequest,
     CodexTurnResult,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _ServerRequestContext:
+    thread_id: str
+    cwd: Path
+    sandbox: CodexSandbox
 
 
 class CodexAppServer(CodexProvider):
@@ -85,7 +93,13 @@ class CodexAppServer(CodexProvider):
                     },
                 },
             )
-            self._response(messages, expected_id=1, deadline=deadline, events=events)
+            self._response(
+                messages,
+                expected_id=1,
+                deadline=deadline,
+                events=events,
+                stdin=process.stdin,
+            )
             self._send(process.stdin, {"method": "initialized", "params": {}})
 
             requested_thread_id = self._resolve_thread_id(request)
@@ -110,6 +124,7 @@ class CodexAppServer(CodexProvider):
                 expected_id=2,
                 deadline=deadline,
                 events=events,
+                stdin=process.stdin,
             )
             thread = _mapping(thread_response.get("thread"), "thread")
             thread_id = _string(thread.get("id"), "thread.id")
@@ -139,6 +154,12 @@ class CodexAppServer(CodexProvider):
                 expected_id=3,
                 deadline=deadline,
                 events=events,
+                stdin=process.stdin,
+                server_context=_ServerRequestContext(
+                    thread_id=thread_id,
+                    cwd=request.cwd,
+                    sandbox=request.sandbox,
+                ),
             )
             turn = _mapping(turn_response.get("turn"), "turn")
             turn_id = _string(turn.get("id"), "turn.id")
@@ -149,6 +170,12 @@ class CodexAppServer(CodexProvider):
                 turn_id=turn_id,
                 deadline=deadline,
                 events=events,
+                stdin=process.stdin,
+                server_context=_ServerRequestContext(
+                    thread_id=thread_id,
+                    cwd=request.cwd,
+                    sandbox=request.sandbox,
+                ),
             )
             return CodexTurnResult(
                 thread_id=thread_id,
@@ -225,12 +252,17 @@ class CodexAppServer(CodexProvider):
         turn_id: str,
         deadline: float,
         events: list[CodexEvent],
+        stdin: Any,
+        server_context: _ServerRequestContext,
     ) -> tuple[str, list[str]]:
         agent_messages: list[str] = []
         while True:
             message = self._read(messages, deadline)
             method = message.get("method")
             if not isinstance(method, str):
+                continue
+            if "id" in message:
+                self._handle_server_request(stdin, message, server_context)
                 continue
             params = _mapping(message.get("params", {}), "notification params")
             events.append(CodexEvent(method=method, params=dict(params)))
@@ -259,6 +291,8 @@ class CodexAppServer(CodexProvider):
         expected_id: int,
         deadline: float,
         events: list[CodexEvent],
+        stdin: Any,
+        server_context: _ServerRequestContext | None = None,
     ) -> Mapping[str, object]:
         while True:
             message = self._read(messages, deadline)
@@ -269,8 +303,60 @@ class CodexAppServer(CodexProvider):
                 return _mapping(message.get("result"), "RPC result")
             method = message.get("method")
             if isinstance(method, str):
+                if "id" in message:
+                    if server_context is None:
+                        raise CodexProviderError(
+                            f"Codex server request arrived before turn context: {method}"
+                        )
+                    self._handle_server_request(stdin, message, server_context)
+                    continue
                 params = _mapping(message.get("params", {}), "notification params")
                 events.append(CodexEvent(method=method, params=dict(params)))
+
+    @classmethod
+    def _handle_server_request(
+        cls,
+        stdin: Any,
+        message: Mapping[str, object],
+        context: _ServerRequestContext,
+    ) -> None:
+        request_id = message.get("id")
+        method = message.get("method")
+        if not isinstance(request_id, (int, str)) or not isinstance(method, str):
+            raise CodexProviderError("Codex server request is malformed")
+        params = _mapping(message.get("params", {}), "server request params")
+
+        if method == "item/fileChange/requestApproval":
+            grant_root = params.get("grantRoot")
+            allowed = grant_root is None or _path_within(grant_root, context.cwd)
+            result: Mapping[str, object] = {"decision": "accept" if allowed else "decline"}
+        elif method == "item/commandExecution/requestApproval":
+            command_cwd = params.get("cwd")
+            allowed = command_cwd is None or _path_within(command_cwd, context.cwd)
+            if context.sandbox is CodexSandbox.READ_ONLY:
+                allowed = False
+            result = {"decision": "accept" if allowed else "decline"}
+        elif method == "item/permissions/requestApproval":
+            result = {
+                "permissions": {"fileSystem": None, "network": None},
+                "scope": "turn",
+                "strictAutoReview": True,
+            }
+        elif method == "item/tool/requestUserInput":
+            result = {"answers": {}}
+        else:
+            cls._send(
+                stdin,
+                {
+                    "id": request_id,
+                    "error": {
+                        "code": -32601,
+                        "message": f"Unsupported server request: {method}",
+                    },
+                },
+            )
+            return
+        cls._send(stdin, {"id": request_id, "result": dict(result)})
 
     @staticmethod
     def _send(stdin: Any, message: Mapping[str, object]) -> None:
@@ -316,18 +402,22 @@ def _terminate(process: subprocess.Popen[str]) -> None:
         process.wait(timeout=5)
 
 
+def _path_within(value: object, root: Path) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    try:
+        Path(value).resolve().relative_to(root.resolve())
+    except ValueError:
+        return False
+    return True
+
+
 def _sandbox_policy(sandbox: CodexSandbox, cwd: Path) -> dict[str, object]:
-    restricted_read = {
-        "type": "restricted",
-        "includePlatformDefaults": True,
-        "readableRoots": [str(cwd)],
-    }
     if sandbox is CodexSandbox.READ_ONLY:
-        return {"type": "readOnly", "access": restricted_read}
+        return {"type": "readOnly", "networkAccess": False}
     return {
         "type": "workspaceWrite",
         "writableRoots": [str(cwd)],
-        "readOnlyAccess": restricted_read,
         "networkAccess": False,
     }
 

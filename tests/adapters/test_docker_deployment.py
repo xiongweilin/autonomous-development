@@ -20,7 +20,7 @@ class FakeDockerRunner:
         command = request.command
         if command[:2] == ("docker", "inspect"):
             if not self.created:
-                return CommandResult(1, "", "Error: No such object")
+                return CommandResult(1, "", "error: no such object")
             image = "sha256:" + ("f" if self.wrong_image else "a") * 64
             return CommandResult(
                 0,

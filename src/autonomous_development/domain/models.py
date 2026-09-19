@@ -7,7 +7,9 @@ from datetime import datetime
 from .enums import (
     CycleState,
     DeploymentState,
+    DevelopmentRequestStatus,
     FeedbackKind,
+    HumanInterventionStatus,
     ReleaseDecisionKind,
     VerificationStatus,
 )
@@ -306,9 +308,8 @@ class Deployment:
             ("environment", self.environment),
         ):
             _required(value, field_name)
-        if (
-            self.state in {DeploymentState.READY, DeploymentState.SERVING}
-            and (self.observed_at is None or not self.observation_refs)
+        if self.state in {DeploymentState.READY, DeploymentState.SERVING} and (
+            self.observed_at is None or not self.observation_refs
         ):
             raise ValueError("ready/serving deployment requires independent observation")
 
@@ -451,3 +452,129 @@ class DevelopmentCycle:
             _required(value, field_name)
         if self.version < 0:
             raise ValueError("cycle version cannot be negative")
+
+
+@dataclass(frozen=True, slots=True)
+class DevelopmentRequest:
+    id: str
+    target_id: str
+    source: str
+    external_reference_digest: str
+    title: str
+    normalized_requirement_text: str
+    content_sha256: str
+    created_at: datetime
+    status: DevelopmentRequestStatus = DevelopmentRequestStatus.RECEIVED
+    cycle_id: str | None = None
+    pending_intervention_id: str | None = None
+    workflow_attempt: int = 0
+    active_workflow_id: str | None = None
+
+    def __post_init__(self) -> None:
+        for field_name, value in (
+            ("request id", self.id),
+            ("target id", self.target_id),
+            ("request source", self.source),
+            ("external reference digest", self.external_reference_digest),
+            ("request title", self.title),
+            ("requirement text", self.normalized_requirement_text),
+            ("content sha256", self.content_sha256),
+        ):
+            _required(value, field_name)
+        if len(self.title) > 512:
+            raise ValueError("request title exceeds V1 limit")
+        if len(self.normalized_requirement_text) > 100_000:
+            raise ValueError("requirement text exceeds V1 limit")
+        if len(self.content_sha256) != 64:
+            raise ValueError("content sha256 must be a 64-character digest")
+        if self.created_at.tzinfo is None:
+            raise ValueError("request created_at must be timezone-aware")
+        if self.workflow_attempt < 0:
+            raise ValueError("request workflow attempt cannot be negative")
+
+
+@dataclass(frozen=True, slots=True)
+class RequirementAnalysis:
+    id: str
+    request_id: str
+    summary: str
+    acceptance_criteria: tuple[str, ...]
+    requested_paths: tuple[str, ...]
+    expected_behavior: tuple[str, ...]
+    risks: tuple[str, ...]
+    missing_information: tuple[str, ...]
+    ambiguity: tuple[str, ...]
+    validation_expectations: tuple[str, ...]
+    created_at: datetime
+
+    def __post_init__(self) -> None:
+        for field_name, value in (
+            ("analysis id", self.id),
+            ("request id", self.request_id),
+            ("analysis summary", self.summary),
+        ):
+            _required(value, field_name)
+        if not self.acceptance_criteria:
+            raise ValueError("requirement analysis requires acceptance criteria")
+        if self.created_at.tzinfo is None:
+            raise ValueError("analysis created_at must be timezone-aware")
+
+    @property
+    def actionable(self) -> bool:
+        return bool(self.requested_paths) and not self.missing_information and not self.ambiguity
+
+
+@dataclass(frozen=True, slots=True)
+class HumanIntervention:
+    id: str
+    request_id: str
+    cycle_id: str | None
+    kind: str
+    question: str
+    choices: tuple[str, ...]
+    status: HumanInterventionStatus
+    created_at: datetime
+    response: str | None = None
+    responded_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        for field_name, value in (
+            ("intervention id", self.id),
+            ("request id", self.request_id),
+            ("intervention kind", self.kind),
+            ("intervention question", self.question),
+        ):
+            _required(value, field_name)
+        if self.created_at.tzinfo is None:
+            raise ValueError("intervention created_at must be timezone-aware")
+        if self.responded_at is not None and self.responded_at.tzinfo is None:
+            raise ValueError("intervention responded_at must be timezone-aware")
+        if (
+            self.status
+            in {
+                HumanInterventionStatus.RESPONDED,
+                HumanInterventionStatus.CLOSED,
+            }
+            and not self.response
+        ):
+            raise ValueError("responded intervention requires a response")
+
+
+@dataclass(frozen=True, slots=True)
+class OperatorEvent:
+    id: str
+    request_id: str | None
+    cycle_id: str | None
+    event_type: str
+    sequence: int | None
+    payload: Mapping[str, object]
+    created_at: datetime
+    acknowledged_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        _required(self.id, "operator event id")
+        _required(self.event_type, "operator event type")
+        if self.created_at.tzinfo is None:
+            raise ValueError("operator event created_at must be timezone-aware")
+        if self.acknowledged_at is not None and self.acknowledged_at.tzinfo is None:
+            raise ValueError("operator event acknowledged_at must be timezone-aware")

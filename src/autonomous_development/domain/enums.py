@@ -66,3 +66,22 @@ class ReleaseDecisionKind(StrEnum):
 class FeedbackKind(StrEnum):
     EXPLICIT = "explicit"
     INFERRED = "inferred"
+
+
+class DevelopmentRequestStatus(StrEnum):
+    RECEIVED = "received"
+    ANALYZING = "analyzing"
+    READY = "ready"
+    RUNNING = "running"
+    NEEDS_HUMAN = "needs-human"
+    COMPLETED = "completed"
+    ROLLED_BACK = "rolled-back"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class HumanInterventionStatus(StrEnum):
+    OPEN = "open"
+    RESPONDED = "responded"
+    CLOSED = "closed"
+    CANCELLED = "cancelled"

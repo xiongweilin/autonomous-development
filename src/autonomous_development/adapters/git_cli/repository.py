@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
+from contextlib import suppress
 from pathlib import Path
 
 from autonomous_development.ports.repository import (
@@ -405,7 +407,18 @@ class GitCliRepository(RepositoryProvider):
         branch = f"autodev/{safe_id}"
 
         if path.exists():
-            self._run(root, "worktree", "remove", "--force", str(path))
+            try:
+                self._run(root, "worktree", "remove", "--force", str(path))
+            except GitRepositoryError:
+                if self._worktree_registered(root, path):
+                    raise
+            if path.exists():
+                if self._worktree_registered(root, path):
+                    raise GitRepositoryError(
+                        "worktree remained registered after forced cleanup"
+                    )
+                with suppress(OSError):
+                    shutil.rmtree(path)
         self._run(root, "worktree", "prune")
         if (
             self._returncode(
@@ -418,6 +431,24 @@ class GitCliRepository(RepositoryProvider):
             == 0
         ):
             self._run(root, "branch", "-D", branch)
+        # An unregistered directory cannot affect Git safety. Some external
+        # sandbox/test runners may leave an inaccessible cache directory; do
+        # not let that residue prevent the durable workflow from reaching its
+        # terminal state. The next isolated cleanup can remove it when the
+        # runner releases its handle.
+
+    def _worktree_registered(self, repository_root: Path, path: Path) -> bool:
+        output = self._run(repository_root, "worktree", "list", "--porcelain")
+        for line in output.splitlines():
+            if not line.startswith("worktree "):
+                continue
+            try:
+                registered = Path(line.removeprefix("worktree ")).resolve()
+            except OSError:
+                continue
+            if registered == path:
+                return True
+        return False
 
     def _validate_existing_worktree(
         self,

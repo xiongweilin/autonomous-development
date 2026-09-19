@@ -1234,3 +1234,22 @@ Experiment, ReleaseDecision or rollback. GitHub remains the repository CI/securi
 
 A future change to a frozen decision requires a concrete implementation-blocking fact, replacement
 analysis and an explicit design revision before dependent implementation proceeds.
+
+## 23. Operator requirements and dedicated Feishu profile
+
+The implemented V1 also has a human-authoritative requirement intake path. `DevelopmentRequest`
+is not `UserFeedback`: it stores the immutable normalized requirement and content digest, then
+flows through a read-only requirement analysis into the existing `ChangeProposal` and durable
+iteration/soak workflows. Objective revisions, mutation policy, target contract, verification
+gates, deployment authority and release controllers remain higher-order boundaries.
+
+`RequirementAutonomyWorkflow` is a thin durable adapter. It does not duplicate implementation,
+verification, build, deployment, performance, canary, promotion, rollback, soak or cleanup logic.
+It creates bounded `HumanIntervention` records when the requirement is ambiguous, outside policy,
+or the baseline/target needs recovery. It writes a monotonic operator event outbox; a provider
+adapter may be offline without changing cycle durability.
+
+The Feishu adapter is intentionally a separate profile and process. It uses a new self-built Bot
+application, independent credentials, owner allowlist, SQLite transport state and operator HMAC.
+V1 accepts only owner P2P messages, text/post, `.txt`, `.md`, `.docx` and extractable-text PDF
+requirements. The existing gateway bot and its `lark-oapi` behavior are not migrated or reused.

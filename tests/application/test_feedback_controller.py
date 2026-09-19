@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from autonomous_development.application.feedback_controller import (
     FeedbackIterationController,
@@ -42,7 +43,7 @@ def release(now: datetime) -> ReleasedVersion:
 def target() -> DevelopmentTarget:
     return DevelopmentTarget(
         id="target-1",
-        repository="/repo",
+        repository=str(Path.cwd().resolve()),
         default_branch="main",
         target_contract_revision="contract-1",
         active_objective_revision_id="objective-1",
