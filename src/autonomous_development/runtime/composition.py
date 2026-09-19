@@ -311,6 +311,9 @@ def compose_runtime(settings: RuntimeSettings) -> RuntimeComposition:
         releases,
         SqlSoakDecisionRepository(engine),
         release_runtime,
+        source_promotion,
+        repository_root=repository_root,
+        default_branch=target.default_branch,
     )
     guardrails = CanaryGuardrails(
         max_candidate_error_rate=contract.canary.max_candidate_error_rate,
