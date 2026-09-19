@@ -160,6 +160,10 @@ class PostPromotionSoakService:
 
         if decision.kind is not SoakDecisionKind.ROLLBACK:
             raise RuntimeError(f"unsupported soak decision: {decision.kind.value}")
+        if cycle.state is CycleState.ROLLED_BACK:
+            return cycle
+        if cycle.state is not CycleState.SOAKING:
+            raise ValueError("rollback decision requires a soaking cycle")
         return self._rollback_to_baseline(cycle, effect_operation_id)
 
     def rollback_unobserved(
