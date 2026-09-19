@@ -128,6 +128,12 @@ class RuntimeReadinessService:
                     False,
                     "target contract identity differs from registry",
                 )
+            if contract.revision != target.target_contract_revision:
+                return ReadinessCheck(
+                    "registered-target",
+                    False,
+                    "target contract revision differs from registry",
+                )
             missing = sorted(
                 {
                     gate.command[0]
