@@ -10,6 +10,7 @@ from autonomous_development.ports.persistence import (
     FeedbackRepository,
     RequestAttributionRepository,
 )
+from autonomous_development.ports.traffic import TrafficRouteReader
 
 
 class FeedbackAttributionError(ValueError):
@@ -37,10 +38,12 @@ class FeedbackService:
         releases: ReleaseCatalogService,
         repository: FeedbackRepository,
         attributions: RequestAttributionRepository | None = None,
+        routes: TrafficRouteReader | None = None,
     ) -> None:
         self._releases = releases
         self._repository = repository
         self._attributions = attributions
+        self._routes = routes
 
     def ingest(self, submission: FeedbackSubmission) -> UserFeedback:
         release_id: str | None
@@ -76,6 +79,17 @@ class FeedbackService:
             if serving is None:
                 raise FeedbackAttributionError(
                     f"target {submission.target_id} has no serving release"
+                )
+            route = self._routes.read_current() if self._routes is not None else None
+            if (
+                route is not None
+                and route.target_id == submission.target_id
+                and route.candidate_weight_percent > 0
+                and route.candidate_deployment_id is not None
+                and route.candidate_deployment_id != serving.deployment_id
+            ):
+                raise FeedbackAttributionError(
+                    "request reference is required while candidate traffic is active"
                 )
             release_id = serving.id
             deployment_id = serving.deployment_id
