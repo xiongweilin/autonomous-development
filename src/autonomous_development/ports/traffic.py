@@ -12,6 +12,9 @@ class TrafficSplit:
     candidate_base_url: str
     candidate_weight_percent: int
     operation_id: str
+    target_id: str | None = None
+    control_release_id: str | None = None
+    candidate_deployment_id: str | None = None
 
     def __post_init__(self) -> None:
         for label, value in (
@@ -26,6 +29,15 @@ class TrafficSplit:
             raise ValueError("stage_index cannot be negative")
         if not 0 <= self.candidate_weight_percent <= 100:
             raise ValueError("candidate traffic weight must be between 0 and 100")
+        attribution = (
+            self.target_id,
+            self.control_release_id,
+            self.candidate_deployment_id,
+        )
+        if any(value is not None for value in attribution) and not all(
+            isinstance(value, str) and value.strip() for value in attribution
+        ):
+            raise ValueError("traffic attribution identity must be complete when provided")
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +59,9 @@ class TrafficRouteSnapshot:
     operation_id: str
     generation: int
     evidence_ref: str
+    target_id: str | None = None
+    control_release_id: str | None = None
+    candidate_deployment_id: str | None = None
 
 
 class TrafficRouteReader(Protocol):
