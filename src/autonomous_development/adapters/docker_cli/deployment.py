@@ -115,7 +115,8 @@ class DockerDeploymentProvider(DeploymentProvider):
             )
         )
         if inspected.returncode != 0:
-            if "No such object" in inspected.stderr or "No such container" in inspected.stderr:
+            stderr = inspected.stderr.lower()
+            if "no such object" in stderr or "no such container" in stderr:
                 return None
             raise DeploymentProviderError("Docker inspect failed while reconciling deployment")
 

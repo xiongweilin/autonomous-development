@@ -69,6 +69,10 @@ class ProposalService:
     def get(self, proposal_id: str) -> ChangeProposal | None:
         return self._repository.get(proposal_id)
 
+    def add(self, proposal: ChangeProposal) -> ChangeProposal:
+        """Persist a validated proposal prepared by a non-diagnosis intake path."""
+        return self._repository.add(proposal)
+
 
 def _change_intent(diagnosis: Diagnosis) -> str:
     intent = (

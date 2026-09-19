@@ -17,6 +17,9 @@ class RuntimeSettings(BaseSettings):
     database_url: SecretStr
     dbos_system_database_url: SecretStr
     state_root: Path
+    operator_hmac_secret_file: Path | None = None
+    operator_hmac_ttl_seconds: int = Field(default=300, ge=30, le=3600)
+    requirement_analysis_timeout_seconds: int = Field(default=600, ge=30, le=3600)
 
     api_host: str = "127.0.0.1"
     api_port: int = Field(default=8765, ge=1, le=65535)
@@ -44,6 +47,16 @@ class RuntimeSettings(BaseSettings):
         path = Path(str(value)).expanduser()
         if not path.is_absolute():
             raise ValueError("state_root must be an absolute path")
+        return path.resolve()
+
+    @field_validator("operator_hmac_secret_file", mode="before")
+    @classmethod
+    def validate_operator_secret_file(cls, value: object) -> Path | None:
+        if value is None or str(value).strip() == "":
+            return None
+        path = Path(str(value)).expanduser()
+        if not path.is_absolute():
+            raise ValueError("operator_hmac_secret_file must be an absolute path")
         return path.resolve()
 
     @field_validator("api_host")

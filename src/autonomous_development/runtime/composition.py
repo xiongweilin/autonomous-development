@@ -13,6 +13,7 @@ from autonomous_development.adapters.canary_proxy.metrics import CanaryMetricsRe
 from autonomous_development.adapters.canary_proxy.observer import ProxyCanaryObserver
 from autonomous_development.adapters.canary_proxy.router import create_canary_proxy
 from autonomous_development.adapters.codex_app_server.client import CodexAppServer
+from autonomous_development.adapters.codex_exec.client import CodexExecProvider
 from autonomous_development.adapters.docker_cli.build import DockerBuildProvider
 from autonomous_development.adapters.docker_cli.deployment import DockerDeploymentProvider
 from autonomous_development.adapters.evidence.local import LocalEvidenceStore
@@ -28,6 +29,7 @@ from autonomous_development.adapters.postgres.feedback import SqlFeedbackReposit
 from autonomous_development.adapters.postgres.feedback_triggers import (
     SqlFeedbackTriggerRepository,
 )
+from autonomous_development.adapters.postgres.operator import SqlOperatorRepository
 from autonomous_development.adapters.postgres.proposals import SqlChangeProposalRepository
 from autonomous_development.adapters.postgres.release_decisions import (
     SqlReleaseDecisionRepository,
@@ -53,6 +55,7 @@ from autonomous_development.adapters.supply_chain.syft_grype import SyftGrypeSca
 from autonomous_development.adapters.target_contract.toml import TomlTargetContractLoader
 from autonomous_development.adapters.traffic.file import AtomicFileTrafficDirector
 from autonomous_development.api.app import create_control_app
+from autonomous_development.api.operator_security import OperatorAuthenticator
 from autonomous_development.application.build import BuildService
 from autonomous_development.application.canary import CanaryService
 from autonomous_development.application.cycles import CycleService
@@ -67,6 +70,7 @@ from autonomous_development.application.iteration_scheduler import (
     FeedbackIterationPolicy,
     FeedbackIterationSchedulerService,
 )
+from autonomous_development.application.operator import OperatorService
 from autonomous_development.application.proposals import ProposalService
 from autonomous_development.application.release_catalog import ReleaseCatalogService
 from autonomous_development.application.release_finalization import (
@@ -74,6 +78,7 @@ from autonomous_development.application.release_finalization import (
 )
 from autonomous_development.application.release_runtime import ReleaseRuntimeService
 from autonomous_development.application.releases import ReleaseService
+from autonomous_development.application.requirements import RequirementAnalysisService
 from autonomous_development.application.soak import PostPromotionSoakService
 from autonomous_development.application.source_promotion import SourcePromotionService
 from autonomous_development.application.target_registry import TargetRegistryService
@@ -92,6 +97,10 @@ from autonomous_development.workflows.feedback_autonomy import (
 from autonomous_development.workflows.post_promotion_soak import (
     PostPromotionSoakWorkflow,
 )
+from autonomous_development.workflows.requirements import (
+    RequirementAutonomyWorkflow,
+    start_requirement_workflow,
+)
 
 
 class RuntimeConfigurationError(RuntimeError):
@@ -106,6 +115,7 @@ class RuntimeComposition:
     readiness: RuntimeReadinessService
     target_id: str
     schedule_name: str
+    operator: OperatorService
     _launched: bool = False
 
     def launch(self) -> None:
@@ -157,6 +167,7 @@ def compose_runtime(settings: RuntimeSettings) -> RuntimeComposition:
     attribution_repository = SqlRequestAttributionRepository(engine)
     target_repository = SqlTargetRepository(engine)
     objective_repository = SqlObjectiveRepository(engine)
+    operator_repository = SqlOperatorRepository(engine)
 
     cycles = CycleService(cycle_repository)
     releases = ReleaseCatalogService(release_repository)
@@ -197,12 +208,16 @@ def compose_runtime(settings: RuntimeSettings) -> RuntimeComposition:
     codex = CodexAppServer(
         thread_journal_root=settings.codex_thread_journal_root,
     )
+    engineering_codex = CodexExecProvider(
+        thread_journal_root=settings.codex_thread_journal_root,
+    )
     diagnosis = DiagnosisService(
         codex,
         feedback_repository,
         SqlDiagnosisRepository(engine),
     )
-    proposals = ProposalService(SqlChangeProposalRepository(engine))
+    proposal_repository = SqlChangeProposalRepository(engine)
+    proposals = ProposalService(proposal_repository)
     iterations = IterationService(cycles, repository, diagnosis, proposals)
 
     telemetry = PrometheusTelemetryProvider(
@@ -269,7 +284,7 @@ def compose_runtime(settings: RuntimeSettings) -> RuntimeComposition:
         experiments,
         SqlReleaseDecisionRepository(engine),
     )
-    engineering = EngineeringService(repository, codex)
+    engineering = EngineeringService(repository, engineering_codex)
     finalization = ReleaseFinalizationService(releases)
     source_promotion = SourcePromotionService(repository)
     performance_gates = K6PerformanceGateFactory(
@@ -338,6 +353,33 @@ def compose_runtime(settings: RuntimeSettings) -> RuntimeComposition:
     )
     bind_scheduled_feedback_workflow(autonomy)
 
+    operator = OperatorService(
+        operator_repository,
+        cycles=cycles,
+        proposals=proposals,
+        targets=targets,
+        releases=releases,
+        requirements=RequirementAnalysisService(
+            codex,
+            operator_repository,
+            timeout_seconds=settings.requirement_analysis_timeout_seconds,
+        ),
+        target_contracts=contract_loader,
+        source_repository=repository,
+        repository_root=repository_root,
+        mandatory_gate_ids=tuple(gate.id for gate in contract.verification.gates),
+    )
+    requirement_workflow = RequirementAutonomyWorkflow(
+        operator,
+        execution,
+        soak,
+        config_name=f"requirement-autonomy-{_safe_name(target.id)}",
+    )
+    operator_authenticator = OperatorAuthenticator.from_file(
+        settings.operator_hmac_secret_file,
+        ttl_seconds=settings.operator_hmac_ttl_seconds,
+    )
+
     readiness = RuntimeReadinessService(
         settings=settings,
         engine=engine,
@@ -346,6 +388,8 @@ def compose_runtime(settings: RuntimeSettings) -> RuntimeComposition:
         contracts=contract_loader,
         runner=runner,
         traffic=traffic,
+        operator_repository=operator_repository,
+        operator_auth_configured=operator_authenticator.configured,
     )
     metrics = CanaryMetricsRegistry()
     proxy_app = create_canary_proxy(
@@ -358,6 +402,13 @@ def compose_runtime(settings: RuntimeSettings) -> RuntimeComposition:
         readiness,
         product_app=proxy_app,
         product_mount_path="/product",
+        operator=operator,
+        operator_authenticator=operator_authenticator,
+        start_operator_workflow=lambda request_id, workflow_id: start_requirement_workflow(
+            requirement_workflow,
+            request_id=request_id,
+            workflow_id=workflow_id,
+        ),
     )
 
     return RuntimeComposition(
@@ -367,6 +418,7 @@ def compose_runtime(settings: RuntimeSettings) -> RuntimeComposition:
         readiness=readiness,
         target_id=target.id,
         schedule_name=f"autodev-feedback-{_safe_name(target.id)}",
+        operator=operator,
     )
 
 

@@ -9,6 +9,7 @@ from sqlalchemy import Engine, text
 
 from autonomous_development.application.release_catalog import ReleaseCatalogService
 from autonomous_development.application.target_registry import TargetRegistryService
+from autonomous_development.ports.persistence import OperatorRepository
 from autonomous_development.ports.process import CommandRequest, ProcessRunner
 from autonomous_development.ports.readiness import ReadinessCheck, ReadinessReport
 from autonomous_development.ports.target_contract import TargetContractLoader
@@ -29,6 +30,8 @@ class RuntimeReadinessService:
         runner: ProcessRunner,
         traffic: TrafficRouteReader | None = None,
         http_transport: httpx.BaseTransport | None = None,
+        operator_repository: OperatorRepository | None = None,
+        operator_auth_configured: bool = True,
     ) -> None:
         self._settings = settings
         self._engine = engine
@@ -38,6 +41,8 @@ class RuntimeReadinessService:
         self._runner = runner
         self._traffic = traffic
         self._http_transport = http_transport
+        self._operator_repository = operator_repository
+        self._operator_auth_configured = operator_auth_configured
 
     def check(self) -> ReadinessReport:
         checks = [
@@ -57,10 +62,32 @@ class RuntimeReadinessService:
             self._prometheus(),
             self._canary_proxy(),
         ]
+        if self._operator_repository is not None:
+            checks.append(self._operator())
         return ReadinessReport(
             ready=all(check.ready for check in checks),
             checks=tuple(checks),
         )
+
+    def _operator(self) -> ReadinessCheck:
+        if not self._operator_auth_configured:
+            return ReadinessCheck("operator-api", False, "HMAC secret file is not configured")
+        repository = self._operator_repository
+        if repository is None:
+            return ReadinessCheck("operator-api", False, "operator repository is unavailable")
+        try:
+            pending = repository.pending_event_count()
+            interventions = repository.pending_intervention_count()
+            latest = repository.latest_event_sequence()
+            return ReadinessCheck(
+                "operator-api",
+                True,
+                "authenticated; "
+                f"pending_events={pending}; pending_interventions={interventions}; "
+                f"latest_sequence={latest}",
+            )
+        except Exception as exc:
+            return ReadinessCheck("operator-api", False, type(exc).__name__)
 
     def _database(self) -> ReadinessCheck:
         try:

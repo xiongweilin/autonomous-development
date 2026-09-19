@@ -263,3 +263,69 @@ feedback_iteration_triggers = Table(
     Column("proposal_id", String(128)),
     Column("outcome", String(64), nullable=False),
 )
+
+
+development_requests = Table(
+    "development_requests",
+    metadata,
+    Column("id", String(160), primary_key=True),
+    Column("target_id", String(128), nullable=False, index=True),
+    Column("source", String(64), nullable=False),
+    Column("external_reference_digest", String(64), nullable=False, unique=True),
+    Column("title", String(512), nullable=False),
+    Column("normalized_requirement_text", String(100_000), nullable=False),
+    Column("content_sha256", String(64), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, index=True),
+    Column("status", String(32), nullable=False, index=True),
+    Column("cycle_id", String(128), index=True),
+    Column("pending_intervention_id", String(160), index=True),
+    Column("workflow_attempt", Integer, nullable=False, default=0),
+    Column("active_workflow_id", String(256)),
+)
+
+
+requirement_analyses = Table(
+    "requirement_analyses",
+    metadata,
+    Column("id", String(160), primary_key=True),
+    Column("request_id", String(160), nullable=False, unique=True, index=True),
+    Column("summary", String(4_000), nullable=False),
+    Column("acceptance_criteria_json", JSON, nullable=False),
+    Column("requested_paths_json", JSON, nullable=False),
+    Column("expected_behavior_json", JSON, nullable=False),
+    Column("risks_json", JSON, nullable=False),
+    Column("missing_information_json", JSON, nullable=False),
+    Column("ambiguity_json", JSON, nullable=False),
+    Column("validation_expectations_json", JSON, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
+
+human_interventions = Table(
+    "human_interventions",
+    metadata,
+    Column("id", String(160), primary_key=True),
+    Column("request_id", String(160), nullable=False, index=True),
+    Column("cycle_id", String(128), index=True),
+    Column("kind", String(64), nullable=False),
+    Column("question", String(4_000), nullable=False),
+    Column("choices_json", JSON, nullable=False),
+    Column("status", String(32), nullable=False, index=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("response", String(8_000)),
+    Column("responded_at", DateTime(timezone=True)),
+)
+
+
+operator_events = Table(
+    "operator_events",
+    metadata,
+    Column("sequence", Integer, primary_key=True, autoincrement=True),
+    Column("id", String(160), nullable=False, unique=True),
+    Column("request_id", String(160), index=True),
+    Column("cycle_id", String(128), index=True),
+    Column("event_type", String(64), nullable=False, index=True),
+    Column("payload_json", JSON, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, index=True),
+    Column("acknowledged_at", DateTime(timezone=True)),
+)

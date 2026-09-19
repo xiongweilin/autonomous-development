@@ -131,6 +131,29 @@ def test_committed_candidate_replay_does_not_create_second_commit(tmp_path: Path
     assert run(worktree.path, "rev-list", "--count", f"{baseline.commit}..HEAD") == "1"
 
 
+def test_cleanup_removes_stale_unregistered_worktree_directory(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path)
+    provider = GitCliRepository()
+    baseline = provider.verify_baseline(repo, "main")
+    worktree = provider.create_worktree(
+        baseline,
+        cycle_id="cycle-stale-cleanup",
+        worktree_root=tmp_path / "worktrees",
+    )
+    (worktree.path / ".pytest_cache").mkdir()
+    (worktree.path / ".pytest_cache" / "marker").write_text("stale", encoding="utf-8")
+    (worktree.path / ".git").unlink()
+    run(repo, "worktree", "prune")
+
+    provider.cleanup_cycle(
+        repo,
+        cycle_id="cycle-stale-cleanup",
+        worktree_root=tmp_path / "worktrees",
+    )
+
+    assert not worktree.path.exists()
+
+
 def test_dirty_baseline_is_rejected(tmp_path: Path) -> None:
     repo = make_repo(tmp_path)
     (repo / "app.py").write_text("dirty\n", encoding="utf-8")

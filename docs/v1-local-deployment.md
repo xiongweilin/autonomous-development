@@ -298,6 +298,12 @@ Codex is restricted to the bounded workspace for repository reads/writes, has no
 authority, and runs implementation turns without network access. The orchestrator owns commits,
 Docker, traffic, release decisions, and rollback.
 
+Candidate builds use `docker build --pull` so the local cache does not silently pin an old base
+layer. This only refreshes the build input; SBOM and vulnerability gates remain mandatory. If
+the refreshed base image or dependency set still contains configured high/critical findings, the
+candidate remains rejected and the target's Dockerfile/dependency owner must remediate it; V1
+does not weaken the scanner threshold or silently create an exception.
+
 ## 10. Rollback and terminal cleanup
 
 Before soak completes, the previous release remains a real rollback target.
@@ -346,3 +352,23 @@ This runbook does not authorize:
 - multi-target concurrent operation.
 
 Those are outside V1.
+
+## 13. Operator API and independent Feishu bridge
+
+The operator API is loopback-only and HMAC-authenticated. Configure a new secret file with
+`AUTODEV_OPERATOR_HMAC_SECRET_FILE`; do not reuse any existing gateway or control-plane key. The
+wire contract, event cursor and ACK order are documented in
+[operator-contract.md](operator-contract.md).
+
+The Feishu bridge is a separate Windows process from the existing Feishu gateway. It has its own
+App ID/App Secret, owner `open_id`, SQLite state file and health/metrics port. It never widens the
+control-plane bind address and does not make Feishu availability a readiness dependency for a
+running development cycle. Follow [feishu-integration-runbook.md](feishu-integration-runbook.md)
+and complete [feishu-autodev-app-setup.md](feishu-autodev-app-setup.md) before a real Feishu E2E.
+
+## 14. Isolated acceptance profile
+
+`acceptance/target` is a disposable template, not the production target. Copy it to a separate
+git checkout before registering it. Use a separate PostgreSQL database, DBOS system database,
+`AUTODEV_STATE_ROOT`, Docker image/container names and bridge SQLite file. Do not register it in
+the production database and remove the copied checkout and temporary resources after the run.

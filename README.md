@@ -27,6 +27,9 @@ V1 deliberately does **not** implement a coding agent. Codex is the engineering 
 - Canonical V1 architecture, semantics, lifecycle and acceptance criteria: [docs/v1-design.md](docs/v1-design.md)
 - Local runtime dependencies and deployment prerequisites: [docs/v1-runtime-dependencies.md](docs/v1-runtime-dependencies.md)
 - Local bootstrap and operation procedure: [docs/v1-local-deployment.md](docs/v1-local-deployment.md)
+- Human requirement/operator API contract: [docs/operator-contract.md](docs/operator-contract.md)
+- Feishu integration runbook: [docs/feishu-integration-runbook.md](docs/feishu-integration-runbook.md)
+- New Feishu app setup checkpoint: [docs/feishu-autodev-app-setup.md](docs/feishu-autodev-app-setup.md)
 - External research basis and adopted/rejected ideas: [docs/v1-research-basis.md](docs/v1-research-basis.md)
 
 ## V1 boundary
@@ -45,3 +48,6 @@ The V1 implementation is local-only. Bootstrap, readiness, autonomous iteration,
 feedback attribution, promotion/rollback, soak, and terminal cleanup are implemented behind the
 single-target runtime boundary. Production acceptance still depends on the repository CI/security
 gates and the local readiness/bootstrap checks documented above.
+Human requirements from the dedicated Feishu operator profile enter the provider-neutral operator
+API and are never converted into `UserFeedback`. Feishu is an operator UI; its outage does not
+stop a durable DBOS workflow or discard the PostgreSQL-backed operator outbox.

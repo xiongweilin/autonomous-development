@@ -51,7 +51,7 @@ def test_codex_review_passes_without_blocking_findings(tmp_path: Path) -> None:
     )
     check = gate.evaluate(candidate(tmp_path))
     assert check.status is VerificationStatus.PASSED
-    assert codex.requests[0].sandbox.value == "readOnly"
+    assert codex.requests[0].sandbox.value == "read-only"
 
 
 def test_codex_review_fails_with_blocking_finding(tmp_path: Path) -> None:

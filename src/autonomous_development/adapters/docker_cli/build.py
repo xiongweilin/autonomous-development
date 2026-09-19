@@ -56,6 +56,7 @@ class DockerBuildProvider(BuildProvider):
                     command=(
                         "docker",
                         "build",
+                        "--pull",
                         "--iidfile",
                         str(iidfile),
                         "--tag",

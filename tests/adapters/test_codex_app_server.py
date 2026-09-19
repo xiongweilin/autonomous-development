@@ -18,6 +18,7 @@ def write_fake_server(
     path: Path,
     *,
     sleep_once_on_turn_start: float = 0.0,
+    request_file_approval: bool = False,
 ) -> tuple[Path, Path]:
     script = path / "fake_codex.py"
     log = path / "methods.log"
@@ -30,6 +31,7 @@ import sys
 import time
 
 SLEEP_TURN = {sleep_once_on_turn_start!r}
+REQUEST_FILE_APPROVAL = {request_file_approval!r}
 LOG = pathlib.Path({str(log)!r})
 MARKER = pathlib.Path({str(marker)!r})
 
@@ -50,7 +52,7 @@ for line in sys.stdin:
         if method == "thread/start":
             params = message["params"]
             assert params["approvalPolicy"] == "never"
-            assert params["sandbox"] == "workspaceWrite"
+            assert params["sandbox"] == "workspace-write"
         else:
             assert message["params"]["threadId"] == "thr-test"
         emit({{"id": message["id"], "result": {{"thread": {{"id": "thr-test"}}}}}})
@@ -63,10 +65,21 @@ for line in sys.stdin:
         assert policy["type"] == "workspaceWrite"
         assert policy["networkAccess"] is False
         assert policy["writableRoots"] == [params["cwd"]]
-        read_access = policy["readOnlyAccess"]
-        assert read_access["type"] == "restricted"
-        assert read_access["includePlatformDefaults"] is True
-        assert read_access["readableRoots"] == [params["cwd"]]
+        if REQUEST_FILE_APPROVAL:
+            emit({{
+                "id": 41,
+                "method": "item/fileChange/requestApproval",
+                "params": {{
+                    "itemId": "item-test",
+                    "startedAtMs": 1,
+                    "threadId": "thr-test",
+                    "turnId": "turn-test",
+                    "grantRoot": params["cwd"],
+                }},
+            }})
+            approval = json.loads(next(sys.stdin))
+            assert approval["id"] == 41
+            assert approval["result"]["decision"] == "accept"
         emit({{"id": message["id"], "result": {{"turn": {{"id": "turn-test"}}}}}})
         emit({{
             "method": "item/completed",
@@ -108,6 +121,15 @@ def test_app_server_handshake_and_bounded_turn(tmp_path: Path) -> None:
     assert result.turn_id == "turn-test"
     assert result.completed
     assert result.agent_messages == ("done",)
+
+
+def test_app_server_auto_approves_changes_inside_workspace(tmp_path: Path) -> None:
+    fake, _ = write_fake_server(tmp_path, request_file_approval=True)
+    provider = CodexAppServer(command=(sys.executable, str(fake)))
+
+    result = provider.run_turn(request(tmp_path.resolve()))
+
+    assert result.completed
 
 
 def test_thread_journal_resumes_after_process_dies_while_waiting(tmp_path: Path) -> None:

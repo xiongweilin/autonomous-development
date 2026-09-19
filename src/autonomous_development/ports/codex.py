@@ -8,8 +8,8 @@ from typing import Protocol
 
 
 class CodexSandbox(StrEnum):
-    READ_ONLY = "readOnly"
-    WORKSPACE_WRITE = "workspaceWrite"
+    READ_ONLY = "read-only"
+    WORKSPACE_WRITE = "workspace-write"
 
 
 @dataclass(frozen=True, slots=True)

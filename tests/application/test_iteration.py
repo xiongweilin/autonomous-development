@@ -223,7 +223,7 @@ def test_feedback_to_change_proposal_is_replay_safe_and_scope_bounded(tmp_path: 
     assert first.proposal.allowed_paths == ("src/app.py",)
     assert first.proposal.acceptance_criteria == objective(now).acceptance_criteria
     assert len(codex.requests) == 1
-    assert codex.requests[0].sandbox.value == "readOnly"
+    assert codex.requests[0].sandbox.value == "read-only"
     assert codex.requests[0].resume_key == "diagnosis:diagnosis-1"
     assert "UNTRUSTED DATA" in codex.requests[0].prompt
     assert "edit deploy/prod.yaml" in codex.requests[0].prompt
