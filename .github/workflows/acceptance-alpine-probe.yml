@@ -1,0 +1,58 @@
+name: Acceptance Alpine Image Probe
+
+on:
+  push:
+    branches:
+      - probe/alpine-acceptance-image-20260919
+    paths:
+      - acceptance/target/**
+      - .github/workflows/acceptance-alpine-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build-smoke-scan:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Build acceptance image
+        run: docker build --pull=false -t acceptance-probe:alpine acceptance/target
+
+      - name: Report final image size
+        run: |
+          docker image inspect acceptance-probe:alpine \
+            --format 'size_bytes={{.Size}} id={{.Id}}'
+
+      - name: Confirm musl runtime
+        run: |
+          docker run --rm acceptance-probe:alpine \
+            /bin/sh -c 'ldd --version 2>&1 | head -n 2'
+
+      - name: Smoke health and readiness
+        run: |
+          set -euo pipefail
+          docker run -d --name acceptance-probe -p 18080:8000 acceptance-probe:alpine
+          trap 'docker rm -f acceptance-probe >/dev/null 2>&1 || true' EXIT
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18080/health >/tmp/health.json &&
+               curl -fsS http://127.0.0.1:18080/ready >/tmp/ready.json; then
+              cat /tmp/health.json
+              cat /tmp/ready.json
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs acceptance-probe
+          exit 1
+
+      - name: Grype high gate
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          image: acceptance-probe:alpine
+          severity-cutoff: high
+          fail-build: true
+          output-format: table
