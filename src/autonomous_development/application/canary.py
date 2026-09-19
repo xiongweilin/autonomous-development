@@ -105,6 +105,34 @@ class CanaryService:
         )
         return CanaryStageResult(experiment=persisted, decision=decision)
 
+    def restore_candidate_control(
+        self,
+        experiment_id: str,
+        *,
+        operation_id: str,
+    ) -> None:
+        if not operation_id.strip():
+            raise ValueError("operation_id must be non-empty")
+        experiment = self._experiments.get(experiment_id)
+        route = self._traffic.read_current()
+        if route is None:
+            raise RuntimeError("cannot reconcile canary failure without active traffic state")
+        if route.target_id != experiment.target_id:
+            raise RuntimeError("active traffic route is not bound to the canary target")
+        if route.candidate_deployment_id is None:
+            raise RuntimeError("active traffic route lacks candidate deployment identity")
+        if route.candidate_deployment_id != experiment.candidate_deployment_id:
+            return
+        if route.candidate_weight_percent <= 0:
+            return
+        self._restore_control(
+            experiment_id=route.experiment_id,
+            stage_index=route.stage_index,
+            control_base_url=route.control_base_url,
+            candidate_base_url=route.candidate_base_url,
+            operation_id=operation_id,
+        )
+
     def _ensure_post_decision_routing(
         self,
         experiment: Experiment,
