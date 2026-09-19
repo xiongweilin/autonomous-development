@@ -8,12 +8,12 @@ from pathlib import Path
 from pydantic import SecretStr
 from sqlalchemy import create_engine
 
+from autonomous_development.adapters.evidence.local import LocalEvidenceStore
 from autonomous_development.adapters.postgres.releases import SqlReleasedVersionRepository
 from autonomous_development.adapters.postgres.target_registry import (
     SqlObjectiveRepository,
     SqlTargetRepository,
 )
-from autonomous_development.adapters.evidence.local import LocalEvidenceStore
 from autonomous_development.adapters.traffic.file import AtomicFileTrafficDirector
 from autonomous_development.application.release_catalog import ReleaseCatalogService
 from autonomous_development.application.target_registry import TargetRegistryService
