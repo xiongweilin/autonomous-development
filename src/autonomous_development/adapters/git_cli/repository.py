@@ -389,6 +389,36 @@ class GitCliRepository(RepositoryProvider):
             str(worktree.path),
         )
 
+    def cleanup_cycle(
+        self,
+        repository_root: Path,
+        *,
+        cycle_id: str,
+        worktree_root: Path,
+    ) -> None:
+        safe_id = _safe_cycle_id(cycle_id)
+        root = repository_root.resolve()
+        worktree_parent = worktree_root.resolve()
+        path = (worktree_parent / safe_id).resolve()
+        if worktree_parent not in path.parents:
+            raise GitRepositoryError("resolved cleanup worktree escaped its configured root")
+        branch = f"autodev/{safe_id}"
+
+        if path.exists():
+            self._run(root, "worktree", "remove", "--force", str(path))
+        self._run(root, "worktree", "prune")
+        if (
+            self._returncode(
+                root,
+                "show-ref",
+                "--verify",
+                "--quiet",
+                f"refs/heads/{branch}",
+            )
+            == 0
+        ):
+            self._run(root, "branch", "-D", branch)
+
     def _validate_existing_worktree(
         self,
         path: Path,
