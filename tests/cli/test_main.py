@@ -76,3 +76,46 @@ def test_serve_command_launches_uvicorn_and_closes(monkeypatch) -> None:
     assert runtime.launched == 1
     assert runtime.closed == 1
     assert calls == [(runtime.app, "127.0.0.1", 9876, "info")]
+
+
+def test_bootstrap_command_prints_result_without_composing_runtime(
+    monkeypatch,
+    capsys,
+    tmp_path,
+) -> None:
+    settings = SimpleNamespace()
+    manifest = tmp_path / "bootstrap.json"
+    manifest.write_text("{}", encoding="utf-8")
+    calls: list[object] = []
+
+    monkeypatch.setattr(cli.RuntimeSettings, "from_environment", lambda: settings)
+    monkeypatch.setattr(
+        cli,
+        "bootstrap_runtime",
+        lambda configured, path: {
+            "status": "bootstrapped",
+            "manifest": str(path),
+        },
+    )
+    monkeypatch.setattr(
+        cli,
+        "compose_runtime",
+        lambda configured: calls.append(configured),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "autonomous-development",
+            "bootstrap",
+            "--manifest",
+            str(manifest),
+        ],
+    )
+
+    cli.main()
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "bootstrapped"
+    assert payload["manifest"] == str(manifest)
+    assert calls == []
