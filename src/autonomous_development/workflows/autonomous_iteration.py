@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -156,11 +155,11 @@ class AutonomousIterationWorkflow(DBOSConfiguredInstance):
             )
         pre_verification = _verification_from_document(pre_verification_doc)
         if not pre_verification.passed:
+            self._cleanup_step(cycle_id, None)
             cycle_doc = self._reject_step(
                 cycle_id,
                 operation_id=f"{operation_id}:pre-verification-reject",
             )
-            self._best_effort_cleanup(cycle_id, deployment_id=None)
             return _terminal_result(cycle_doc, "pre-deployment verification failed")
 
         self._verified_step(cycle_id, pre_verification.id, operation_id)
@@ -202,13 +201,10 @@ class AutonomousIterationWorkflow(DBOSConfiguredInstance):
             )
         full_verification = _verification_from_document(full_verification_doc)
         if not full_verification.passed:
+            self._cleanup_step(cycle_id, f"{cycle_id}-candidate")
             cycle_doc = self._reject_step(
                 cycle_id,
                 operation_id=f"{operation_id}:performance-reject",
-            )
-            self._best_effort_cleanup(
-                cycle_id,
-                deployment_id=f"{cycle_id}-candidate",
             )
             return _terminal_result(cycle_doc, "post-deployment performance gate failed")
 
@@ -246,6 +242,8 @@ class AutonomousIterationWorkflow(DBOSConfiguredInstance):
                     error=exc,
                 )
             decision = _canary_decision_from_document(canary_doc)
+            if decision.kind is CanaryDecisionKind.ROLLBACK:
+                self._cleanup_step(cycle_id, f"{cycle_id}-candidate")
             cycle_doc = self._apply_canary_step(
                 cycle_id,
                 canary_doc,
@@ -259,10 +257,6 @@ class AutonomousIterationWorkflow(DBOSConfiguredInstance):
                 canary_round += 1
                 continue
             if decision.kind is CanaryDecisionKind.ROLLBACK:
-                self._best_effort_cleanup(
-                    cycle_id,
-                    deployment_id=f"{cycle_id}-candidate",
-                )
                 return _terminal_result(cycle_doc, "canary regression rolled back")
             if decision.kind is CanaryDecisionKind.PROMOTION_READY:
                 break
@@ -794,29 +788,20 @@ class AutonomousIterationWorkflow(DBOSConfiguredInstance):
         phase: str,
         error: Exception,
     ) -> dict[str, object]:
-        cycle_doc = self._fail_terminal_step(
-            cycle_id,
-            operation_id=f"{operation_id}:failed:{phase}",
-        )
         deployment_id = (
             f"{cycle_id}-candidate"
             if phase in {"deployment", "performance", "canary"}
             else None
         )
-        self._best_effort_cleanup(cycle_id, deployment_id=deployment_id)
+        self._cleanup_step(cycle_id, deployment_id)
+        cycle_doc = self._fail_terminal_step(
+            cycle_id,
+            operation_id=f"{operation_id}:failed:{phase}",
+        )
         return _terminal_result(
             cycle_doc,
             f"{phase} failed closed: {type(error).__name__}",
         )
-
-    def _best_effort_cleanup(
-        self,
-        cycle_id: str,
-        *,
-        deployment_id: str | None,
-    ) -> None:
-        with suppress(Exception):
-            self._cleanup_step(cycle_id, deployment_id)
 
     @DBOS.step(
         retries_allowed=True,
