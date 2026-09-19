@@ -657,6 +657,7 @@ def _proposal_to_document(proposal: ChangeProposal) -> dict[str, object]:
         "allowed_paths": list(proposal.allowed_paths),
         "forbidden_paths": list(proposal.forbidden_paths),
         "max_implementation_attempts": proposal.max_implementation_attempts,
+        "max_changed_files": proposal.max_changed_files,
         "mandatory_gates": list(proposal.mandatory_gates),
         "change_intent": proposal.change_intent,
     }
@@ -676,6 +677,7 @@ def _proposal_from_document(document: dict[str, object]) -> ChangeProposal:
         max_implementation_attempts=_integer(document, "max_implementation_attempts"),
         mandatory_gates=_strings(document, "mandatory_gates"),
         change_intent=_optional_string(document.get("change_intent")),
+        max_changed_files=_integer(document, "max_changed_files"),
     )
 
 
