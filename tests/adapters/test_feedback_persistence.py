@@ -89,7 +89,36 @@ def test_feedback_query_is_release_and_time_bounded() -> None:
     result = feedback.list_attributable(
         "target-1",
         "release-1",
+        deployment_id="deployment-1",
         opened_at=now - timedelta(minutes=30),
         closed_at=now + timedelta(minutes=1),
     )
     assert result == (in_window,)
+
+
+def test_feedback_query_includes_candidate_deployment_after_promotion() -> None:
+    _, feedback = repositories()
+    now = datetime.now(UTC)
+    candidate = UserFeedback(
+        id="feedback-candidate",
+        target_id="target-1",
+        received_at=now,
+        kind=FeedbackKind.EXPLICIT,
+        category="candidate-defect",
+        severity=4,
+        provenance="feedback-api",
+        release_id=None,
+        deployment_id="deployment-2",
+        experiment_id="experiment-1",
+        request_ref="request-candidate",
+    )
+    feedback.add(candidate)
+
+    result = feedback.list_attributable(
+        "target-1",
+        "release-2",
+        deployment_id="deployment-2",
+        opened_at=now - timedelta(minutes=1),
+        closed_at=now + timedelta(minutes=1),
+    )
+    assert result == (candidate,)
