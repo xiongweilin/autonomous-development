@@ -180,6 +180,9 @@ def compose_runtime(settings: RuntimeSettings) -> RuntimeComposition:
     if contract.target_id != target.id:
         engine.dispose()
         raise RuntimeConfigurationError("target contract identity differs from registry")
+    if contract.revision != target.target_contract_revision:
+        engine.dispose()
+        raise RuntimeConfigurationError("target contract revision differs from registry")
 
     codex = CodexAppServer(
         thread_journal_root=settings.codex_thread_journal_root,
