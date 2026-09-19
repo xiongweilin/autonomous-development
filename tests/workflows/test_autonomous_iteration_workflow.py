@@ -380,6 +380,19 @@ def contract() -> TargetContract:
     )
 
 
+def baseline_release() -> ReleasedVersion:
+    return ReleasedVersion(
+        id="release-0",
+        target_id="target-1",
+        source_commit="a" * 40,
+        source_tree="a" * 40,
+        artifact_digest="sha256:" + "0" * 64,
+        objective_revision_id="objective-1",
+        deployment_id="deployment-0",
+        promoted_at=datetime.now(UTC),
+    )
+
+
 def proposal() -> ChangeProposal:
     return ChangeProposal(
         id="proposal-1",
@@ -428,6 +441,8 @@ def test_dbos_iteration_promotes_and_replay_does_not_repeat_effects(tmp_path: Pa
         SqlReleaseDecisionRepository(engine),
     )
     catalog = ReleaseCatalogService(SqlReleasedVersionRepository(engine))
+    catalog.register(baseline_release())
+    catalog.set_serving("target-1", "release-0", operation_id="serve-baseline")
     finalization = ReleaseFinalizationService(catalog)
     source_promotion = FakeSourcePromotion()
 
