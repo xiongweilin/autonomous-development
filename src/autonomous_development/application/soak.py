@@ -34,6 +34,7 @@ class PostPromotionSoakService:
         source_promotion: SourcePromotionService,
         *,
         repository_root: Path,
+        worktree_root: Path,
         default_branch: str,
     ) -> None:
         self._cycles = cycles
@@ -44,6 +45,7 @@ class PostPromotionSoakService:
         self._runtime = runtime
         self._source_promotion = source_promotion
         self._repository_root = repository_root
+        self._worktree_root = worktree_root
         self._default_branch = default_branch
 
     def start(self, cycle_id: str, *, operation_id: str) -> DevelopmentCycle:
@@ -143,6 +145,12 @@ class PostPromotionSoakService:
                 return cycle
             if cycle.state is not CycleState.SOAKING:
                 raise ValueError("complete decision requires a soaking cycle")
+            self._runtime.stop_release(cycle.baseline_release_id)
+            self._source_promotion.cleanup_cycle(
+                repository_root=self._repository_root,
+                worktree_root=self._worktree_root,
+                cycle_id=cycle.id,
+            )
             return self._cycles.transition(
                 cycle.id,
                 CycleState.COMPLETED,
@@ -196,6 +204,14 @@ class PostPromotionSoakService:
             repository_root=self._repository_root,
             default_branch=self._default_branch,
             baseline_commit=baseline.source_commit,
+        )
+        if cycle.candidate_deployment_id is None:
+            raise ValueError("rollback cycle has no candidate deployment")
+        self._runtime.stop_deployment(cycle.candidate_deployment_id)
+        self._source_promotion.cleanup_cycle(
+            repository_root=self._repository_root,
+            worktree_root=self._worktree_root,
+            cycle_id=cycle.id,
         )
         return self._cycles.transition(
             cycle.id,
