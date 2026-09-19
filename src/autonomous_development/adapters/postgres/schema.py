@@ -122,6 +122,19 @@ serving_release_operations = Table(
     Column("previous_release_id", String(128)),
 )
 
+request_attributions = Table(
+    "request_attributions",
+    metadata,
+    Column("request_ref", String(256), primary_key=True),
+    Column("target_id", String(128), nullable=False, index=True),
+    Column("observed_at", DateTime(timezone=True), nullable=False, index=True),
+    Column("arm", String(32), nullable=False),
+    Column("experiment_id", String(128), nullable=False, index=True),
+    Column("release_id", String(128), index=True),
+    Column("deployment_id", String(128), index=True),
+)
+
+
 user_feedback = Table(
     "user_feedback",
     metadata,
@@ -187,6 +200,7 @@ change_proposals = Table(
     Column("allowed_paths_json", JSON, nullable=False),
     Column("forbidden_paths_json", JSON, nullable=False),
     Column("max_implementation_attempts", Integer, nullable=False),
+    Column("max_changed_files", Integer, nullable=False),
     Column("mandatory_gates_json", JSON, nullable=False),
     Column("change_intent", String(4000)),
 )
