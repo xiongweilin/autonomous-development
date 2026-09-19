@@ -83,3 +83,11 @@ class RepositoryProvider(Protocol):
     ) -> RepositoryBaseline: ...
 
     def remove_worktree(self, baseline: RepositoryBaseline, worktree: Worktree) -> None: ...
+
+    def cleanup_cycle(
+        self,
+        repository_root: Path,
+        *,
+        cycle_id: str,
+        worktree_root: Path,
+    ) -> None: ...
