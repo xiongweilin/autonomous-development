@@ -6,7 +6,11 @@ from fastapi.testclient import TestClient
 from autonomous_development.api.feedback import create_feedback_router
 from autonomous_development.application.feedback import FeedbackService
 from autonomous_development.application.release_catalog import ReleaseCatalogService
-from autonomous_development.domain.models import ReleasedVersion, UserFeedback
+from autonomous_development.domain.models import (
+    ReleasedVersion,
+    RequestAttribution,
+    UserFeedback,
+)
 from autonomous_development.ports.persistence import ServingReleaseReceipt
 
 
@@ -43,6 +47,18 @@ class MemoryReleaseRepository:
         )
 
 
+class MemoryAttributionRepository:
+    def __init__(self) -> None:
+        self.items: dict[str, RequestAttribution] = {}
+
+    def add(self, attribution: RequestAttribution) -> RequestAttribution:
+        self.items[attribution.request_ref] = attribution
+        return attribution
+
+    def get(self, request_ref: str) -> RequestAttribution | None:
+        return self.items.get(request_ref)
+
+
 class MemoryFeedbackRepository:
     def __init__(self) -> None:
         self.items: dict[str, UserFeedback] = {}
@@ -61,7 +77,9 @@ class MemoryFeedbackRepository:
         return tuple(self.items.values())
 
 
-def client() -> TestClient:
+def client(
+    attributions: MemoryAttributionRepository | None = None,
+) -> TestClient:
     releases = ReleaseCatalogService(MemoryReleaseRepository())
     releases.register(
         ReleasedVersion(
@@ -78,7 +96,13 @@ def client() -> TestClient:
     releases.set_serving("target-1", "release-1", operation_id="serve-1")
     application = FastAPI()
     application.include_router(
-        create_feedback_router(FeedbackService(releases, MemoryFeedbackRepository()))
+        create_feedback_router(
+            FeedbackService(
+                releases,
+                MemoryFeedbackRepository(),
+                attributions,
+            )
+        )
     )
     return TestClient(application)
 
@@ -99,6 +123,35 @@ def test_feedback_api_uses_server_owned_attribution_and_provenance() -> None:
     assert response.status_code == 201
     assert response.json()["release_id"] == "release-1"
     assert response.json()["deployment_id"] == "deployment-1"
+
+
+def test_feedback_api_returns_candidate_deployment_attribution() -> None:
+    attributions = MemoryAttributionRepository()
+    attributions.add(
+        RequestAttribution(
+            request_ref="request-candidate",
+            target_id="target-1",
+            observed_at=datetime.now(UTC),
+            arm="candidate",
+            experiment_id="experiment-1",
+            deployment_id="deployment-2",
+        )
+    )
+    response = client(attributions).post(
+        "/v1/targets/target-1/feedback",
+        json={
+            "feedback_id": "feedback-candidate",
+            "kind": "explicit",
+            "category": "incorrect-result",
+            "severity": 4,
+            "request_ref": "request-candidate",
+            "reported_deployment_id": "deployment-2",
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["release_id"] is None
+    assert response.json()["deployment_id"] == "deployment-2"
+    assert response.json()["experiment_id"] == "experiment-1"
 
 
 def test_feedback_api_rejects_false_release_claim() -> None:
