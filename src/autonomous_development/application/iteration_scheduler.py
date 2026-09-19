@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from autonomous_development.application.cycles import CycleService
@@ -99,18 +99,11 @@ class FeedbackIterationSchedulerService:
         eligible_until = scheduled_time - timedelta(
             seconds=self._policy.diagnosis_delay_seconds
         )
-        if eligible_until < serving.promoted_at:
-            return FeedbackIterationResult(
-                status="idle",
-                target_id=target_id,
-                reason="no feedback is old enough for deterministic diagnosis",
-            )
-
         candidates = self._feedback.list_attributable(
             target_id,
             serving.id,
             deployment_id=serving.deployment_id,
-            opened_at=serving.promoted_at,
+            opened_at=datetime.min.replace(tzinfo=UTC),
             closed_at=eligible_until,
         )
         feedback = self._select_feedback(candidates)
@@ -137,10 +130,13 @@ class FeedbackIterationSchedulerService:
                 cycle_id=active.id,
                 reason=f"active cycle {active.id} is {active.state.value}",
             )
-        opened_at = max(
-            serving.promoted_at,
-            feedback.received_at
-            - timedelta(seconds=self._policy.evidence_lookback_seconds),
+        contextual_opened_at = feedback.received_at - timedelta(
+            seconds=self._policy.evidence_lookback_seconds
+        )
+        opened_at = (
+            max(serving.promoted_at, contextual_opened_at)
+            if feedback.release_id == serving.id
+            else contextual_opened_at
         )
         closed_at = feedback.received_at + timedelta(
             seconds=self._policy.diagnosis_delay_seconds
