@@ -47,6 +47,9 @@ class TrafficRouteState:
     candidate_weight_percent: int
     generation: int
     evidence_ref: str
+    target_id: str | None = None
+    control_release_id: str | None = None
+    candidate_deployment_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
