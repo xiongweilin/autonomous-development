@@ -58,6 +58,8 @@ from autonomous_development.ports.target_contract import (
 )
 from autonomous_development.ports.telemetry import TelemetryEvidence
 
+CONTRACT_REVISION = "sha256:" + "d" * 64
+
 
 class FakeCodex:
     def __init__(self, confidence: float) -> None:
@@ -139,6 +141,7 @@ class FakeContractLoader:
                 max_candidate_p95_latency_ms=250.0,
                 max_p95_latency_ratio=1.25,
             ),
+            revision=CONTRACT_REVISION,
         )
 
 
@@ -186,7 +189,7 @@ def target(root: Path) -> DevelopmentTarget:
         id="target-1",
         repository=str(root),
         default_branch="main",
-        target_contract_revision="contract-1",
+        target_contract_revision=CONTRACT_REVISION,
         active_objective_revision_id="objective-1",
         mutation_policy=policy(),
     )
