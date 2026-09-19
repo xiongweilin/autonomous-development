@@ -42,7 +42,7 @@ class _WeightedSelector:
         if weight >= 100:
             return "candidate"
         digest = hashlib.sha256(
-            f"{route.experiment_id}\0{session_id}".encode("utf-8")
+            f"{route.experiment_id}\0{session_id}".encode()
         ).digest()
         slot = int.from_bytes(digest[:8], "big") % 100
         return "candidate" if slot < weight else "control"
