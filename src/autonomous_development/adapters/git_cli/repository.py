@@ -336,6 +336,46 @@ class GitCliRepository(RepositoryProvider):
             codex_thread_id=thread_id or None,
         )
 
+    def restore_baseline(
+        self,
+        repository_root: Path,
+        default_branch: str,
+        *,
+        baseline_commit: str,
+    ) -> RepositoryBaseline:
+        root = repository_root.resolve()
+        current = self.verify_baseline(root, default_branch)
+        if current.commit == baseline_commit:
+            return current
+
+        merge_base = self._run(root, "merge-base", baseline_commit, current.commit)
+        if merge_base != baseline_commit:
+            raise GitRepositoryError(
+                "current default branch is not descended from rollback baseline"
+            )
+        count = self._run(root, "rev-list", "--count", f"{baseline_commit}..{current.commit}")
+        if count != "1":
+            raise GitRepositoryError(
+                "source rollback refuses to discard more than one autonomous commit"
+            )
+        subject = self._run(root, "log", "-1", "--format=%s")
+        thread_id = self._run(
+            root,
+            "log",
+            "-1",
+            "--format=%(trailers:key=Autodev-Codex-Thread,valueonly)",
+        )
+        if not subject.startswith("autodev: implement ") or not thread_id:
+            raise GitRepositoryError(
+                "source rollback refuses a default branch head without autonomous provenance"
+            )
+
+        self._run(root, "reset", "--hard", baseline_commit)
+        restored = self.verify_baseline(root, default_branch)
+        if restored.commit != baseline_commit:
+            raise GitRepositoryError("default branch did not reconcile to rollback baseline")
+        return restored
+
     def remove_worktree(
         self,
         baseline: RepositoryBaseline,
