@@ -313,6 +313,7 @@ def compose_runtime(settings: RuntimeSettings) -> RuntimeComposition:
         release_runtime,
         source_promotion,
         repository_root=repository_root,
+        worktree_root=settings.worktree_root,
         default_branch=target.default_branch,
     )
     guardrails = CanaryGuardrails(
