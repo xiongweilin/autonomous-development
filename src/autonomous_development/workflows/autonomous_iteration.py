@@ -235,6 +235,10 @@ class AutonomousIterationWorkflow(DBOSConfiguredInstance):
                     operation_id=f"{operation_id}:canary:{canary_round}",
                 )
             except Exception as exc:
+                self._restore_canary_control_step(
+                    experiment_id,
+                    operation_id=f"{operation_id}:canary:{canary_round}:failure-restore",
+                )
                 return self._terminal_failure_result(
                     cycle_id,
                     operation_id,
@@ -597,6 +601,23 @@ class AutonomousIterationWorkflow(DBOSConfiguredInstance):
             operation_id=operation_id,
         )
         return _canary_decision_to_document(result.decision)
+
+    @DBOS.step(
+        retries_allowed=True,
+        max_attempts=3,
+        interval_seconds=1.0,
+        backoff_rate=2.0,
+    )
+    def _restore_canary_control_step(
+        self,
+        experiment_id: str,
+        *,
+        operation_id: str,
+    ) -> None:
+        self._canary.restore_candidate_control(
+            experiment_id,
+            operation_id=operation_id,
+        )
 
     @DBOS.step(retries_allowed=False)
     def _apply_canary_step(
