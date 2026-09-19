@@ -29,13 +29,13 @@ from autonomous_development.adapters.postgres.feedback_triggers import (
     SqlFeedbackTriggerRepository,
 )
 from autonomous_development.adapters.postgres.proposals import SqlChangeProposalRepository
-from autonomous_development.adapters.postgres.request_attributions import (
-    SqlRequestAttributionRepository,
-)
 from autonomous_development.adapters.postgres.release_decisions import (
     SqlReleaseDecisionRepository,
 )
 from autonomous_development.adapters.postgres.releases import SqlReleasedVersionRepository
+from autonomous_development.adapters.postgres.request_attributions import (
+    SqlRequestAttributionRepository,
+)
 from autonomous_development.adapters.postgres.soak_decisions import (
     SqlSoakDecisionRepository,
 )
