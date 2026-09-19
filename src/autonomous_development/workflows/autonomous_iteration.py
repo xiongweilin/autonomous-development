@@ -281,22 +281,103 @@ class AutonomousIterationWorkflow(DBOSConfiguredInstance):
                 "promotion controller did not produce a promoted cycle",
             )
 
-        self._promote_source_step(candidate_doc)
+        try:
+            self._promote_source_step(candidate_doc)
+        except Exception as exc:
+            cycle_doc = self._rollback_failed_promotion_step(
+                cycle_id,
+                candidate_doc,
+                proposal.baseline_release_id,
+                experiment_id,
+                operation_id=f"{operation_id}:source-promotion-failed",
+            )
+            return _terminal_result(
+                cycle_doc,
+                f"source promotion failed and was rolled back: {type(exc).__name__}",
+            )
+
         promoted_at = self._promotion_time_step()
-        release_doc = self._finalize_release_step(
-            cycle_id,
-            candidate_doc,
-            artifact_doc,
-            deployment_bundle,
-            promoted_at,
-            operation_id,
-        )
+        try:
+            release_doc = self._finalize_release_step(
+                cycle_id,
+                candidate_doc,
+                artifact_doc,
+                deployment_bundle,
+                promoted_at,
+                operation_id,
+            )
+        except Exception as exc:
+            cycle_doc = self._rollback_failed_promotion_step(
+                cycle_id,
+                candidate_doc,
+                proposal.baseline_release_id,
+                experiment_id,
+                operation_id=f"{operation_id}:release-finalization-failed",
+            )
+            return _terminal_result(
+                cycle_doc,
+                f"release finalization failed and was rolled back: {type(exc).__name__}",
+            )
         return {
             "cycle": promotion_doc,
             "release": release_doc,
             "verification": full_verification_doc,
             "status": "promoted",
         }
+
+    @DBOS.step(
+        retries_allowed=True,
+        max_attempts=3,
+        interval_seconds=1.0,
+        backoff_rate=2.0,
+    )
+    def _rollback_failed_promotion_step(
+        self,
+        cycle_id: str,
+        candidate_doc: dict[str, object],
+        baseline_release_id: str,
+        experiment_id: str,
+        *,
+        operation_id: str,
+    ) -> dict[str, object]:
+        cycle = self._cycles.get(cycle_id)
+        if cycle.state is CycleState.ROLLED_BACK:
+            return _cycle_to_document(cycle)
+        if cycle.state is not CycleState.PROMOTED:
+            raise ValueError("failed-promotion rollback requires a promoted cycle")
+
+        self._canary.restore_candidate_control(
+            experiment_id,
+            operation_id=f"{operation_id}:traffic",
+        )
+        self._finalization.restore_serving(
+            cycle.target_id,
+            baseline_release_id,
+            operation_id=f"{operation_id}:serving",
+        )
+
+        candidate = _candidate_from_document(candidate_doc)
+        self._source_promotion.restore_baseline(
+            repository_root=self._repository_root,
+            default_branch=self._default_branch,
+            baseline_commit=candidate.base_commit,
+        )
+        if cycle.candidate_deployment_id is None:
+            raise ValueError("promoted cycle has no candidate deployment")
+        self._deployment.stop(cycle.candidate_deployment_id)
+        self._source_promotion.cleanup_cycle(
+            repository_root=self._repository_root,
+            worktree_root=self._worktree_root,
+            cycle_id=cycle.id,
+        )
+        updated = self._cycles.transition(
+            cycle.id,
+            CycleState.ROLLED_BACK,
+            expected_version=cycle.version,
+            operation_id=f"{operation_id}:cycle",
+            release_decision=ReleaseDecisionKind.ROLLBACK,
+        )
+        return _cycle_to_document(updated)
 
     @DBOS.step(retries_allowed=False)
     def _load_proposal_step(self, proposal_id: str) -> dict[str, object]:
