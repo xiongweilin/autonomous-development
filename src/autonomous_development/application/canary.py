@@ -67,6 +67,9 @@ class CanaryService:
                 candidate_base_url=candidate_base_url,
                 candidate_weight_percent=stage.weight_percent,
                 operation_id=f"{operation_id}:traffic",
+                target_id=experiment.target_id,
+                control_release_id=experiment.control_release_id,
+                candidate_deployment_id=experiment.candidate_deployment_id,
             )
         )
         try:
