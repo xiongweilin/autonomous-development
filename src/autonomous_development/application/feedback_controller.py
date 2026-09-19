@@ -91,6 +91,7 @@ class FeedbackIterationController:
         candidate_feedback = self._feedback.list_attributable(
             target_id,
             baseline.id,
+            deployment_id=baseline.deployment_id,
             opened_at=baseline.promoted_at,
             closed_at=closed_at,
         )
