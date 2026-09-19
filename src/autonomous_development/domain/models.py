@@ -389,6 +389,28 @@ class UserFeedback:
 
 
 @dataclass(frozen=True, slots=True)
+class RequestAttribution:
+    request_ref: str
+    target_id: str
+    observed_at: datetime
+    arm: str
+    experiment_id: str
+    release_id: str | None = None
+    deployment_id: str | None = None
+
+    def __post_init__(self) -> None:
+        _required(self.request_ref, "request reference")
+        _required(self.target_id, "target id")
+        _required(self.experiment_id, "experiment id")
+        if self.arm not in {"control", "candidate"}:
+            raise ValueError("request attribution arm must be control or candidate")
+        if self.arm == "control" and self.release_id is None:
+            raise ValueError("control request attribution requires a release")
+        if self.arm == "candidate" and self.deployment_id is None:
+            raise ValueError("candidate request attribution requires a deployment")
+
+
+@dataclass(frozen=True, slots=True)
 class ReleaseDecision:
     kind: ReleaseDecisionKind
     cycle_id: str
