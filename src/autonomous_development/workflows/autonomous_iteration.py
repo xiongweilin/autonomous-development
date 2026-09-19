@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -712,10 +713,8 @@ class AutonomousIterationWorkflow(DBOSConfiguredInstance):
         *,
         deployment_id: str | None,
     ) -> None:
-        try:
+        with suppress(Exception):
             self._cleanup_step(cycle_id, deployment_id)
-        except Exception:
-            pass
 
     @DBOS.step(
         retries_allowed=True,
