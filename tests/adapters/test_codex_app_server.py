@@ -62,6 +62,11 @@ for line in sys.stdin:
         policy = params["sandboxPolicy"]
         assert policy["type"] == "workspaceWrite"
         assert policy["networkAccess"] is False
+        assert policy["writableRoots"] == [str(path)]
+        read_access = policy["readOnlyAccess"]
+        assert read_access["type"] == "restricted"
+        assert read_access["includePlatformDefaults"] is True
+        assert read_access["readableRoots"] == [str(path)]
         emit({{"id": message["id"], "result": {{"turn": {{"id": "turn-test"}}}}}})
         emit({{
             "method": "item/completed",
