@@ -9,6 +9,7 @@ from pydantic import SecretStr
 from sqlalchemy import create_engine
 
 from autonomous_development.adapters.postgres.releases import SqlReleasedVersionRepository
+from autonomous_development.adapters.target_contract.toml import TomlTargetContractLoader
 from autonomous_development.adapters.postgres.schema import metadata
 from autonomous_development.adapters.postgres.target_registry import (
     SqlObjectiveRepository,
@@ -123,6 +124,8 @@ def seed_database(database_url: str, repository_root: Path) -> None:
         SqlTargetRepository(engine),
         SqlObjectiveRepository(engine),
     )
+    contract_revision = TomlTargetContractLoader().load(str(repository_root)).revision
+    assert contract_revision is not None
     objective = ProductObjectiveRevision(
         id="objective-1",
         target_id="target-1",
@@ -140,7 +143,7 @@ def seed_database(database_url: str, repository_root: Path) -> None:
             id="target-1",
             repository=str(repository_root),
             default_branch="main",
-            target_contract_revision="contract-1",
+            target_contract_revision=contract_revision,
             active_objective_revision_id=objective.id,
             mutation_policy=policy(),
         ),
