@@ -188,14 +188,25 @@ class PostPromotionSoakService:
             raise ValueError("soaking cycle has no experiment identity")
 
         control_runtime = self._runtime.resolve(cycle.baseline_release_id)
-        serving, candidate_runtime = self._runtime.resolve_serving(cycle.target_id)
-        if serving.deployment_id != cycle.candidate_deployment_id:
-            raise ValueError("serving release is not the promoted candidate deployment")
+        soak_experiment_id = f"{cycle.experiment_id}-soak"
+        route = self._traffic.read_current()
+        if route is None or route.experiment_id != soak_experiment_id:
+            raise ValueError("soak rollback requires the active soak traffic route")
+        if (
+            route.target_id is not None
+            and route.target_id != cycle.target_id
+        ):
+            raise ValueError("active soak route belongs to another target")
+        if (
+            route.candidate_deployment_id is not None
+            and route.candidate_deployment_id != cycle.candidate_deployment_id
+        ):
+            raise ValueError("active soak route belongs to another candidate deployment")
         self._traffic.restore_control(
-            experiment_id=f"{cycle.experiment_id}-soak",
+            experiment_id=soak_experiment_id,
             stage_index=0,
             control_base_url=control_runtime.base_url,
-            candidate_base_url=candidate_runtime.base_url,
+            candidate_base_url=route.candidate_base_url,
             operation_id=f"{effect_operation_id}:traffic",
         )
         self._releases.set_serving(
