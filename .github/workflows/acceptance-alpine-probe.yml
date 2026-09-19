@@ -30,7 +30,7 @@ jobs:
       - name: Confirm Python runtime
         run: |
           docker run --rm acceptance-probe:alpine \
-            python3 -c 'import platform,sys; print(sys.version); print(platform.platform())'
+            python3.14 -c 'import platform,sys; print(sys.version); print(platform.platform())'
 
       - name: Smoke health and readiness
         run: |
