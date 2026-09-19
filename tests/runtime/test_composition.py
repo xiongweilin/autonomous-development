@@ -9,12 +9,12 @@ from pydantic import SecretStr
 from sqlalchemy import create_engine
 
 from autonomous_development.adapters.postgres.releases import SqlReleasedVersionRepository
-from autonomous_development.adapters.target_contract.toml import TomlTargetContractLoader
 from autonomous_development.adapters.postgres.schema import metadata
 from autonomous_development.adapters.postgres.target_registry import (
     SqlObjectiveRepository,
     SqlTargetRepository,
 )
+from autonomous_development.adapters.target_contract.toml import TomlTargetContractLoader
 from autonomous_development.application.release_catalog import ReleaseCatalogService
 from autonomous_development.application.target_registry import TargetRegistryService
 from autonomous_development.domain.models import (
