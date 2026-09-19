@@ -1,8 +1,13 @@
 # Feishu integration runbook
 
-Status: code and local adapter implemented; real Feishu app acceptance remains a manual
-checkpoint until the owner creates and installs the new app described in
+Status: implementation and local adapter verification are current; real Feishu end-to-end
+acceptance remains a gated checkpoint. It requires the new app to be created, published,
+securely configured and exercised with an owner P2P flow as described in
 `feishu-autodev-app-setup.md`.
+
+A bridge `/healthz` or `/readyz` result is not sufficient to claim full acceptance. The control
+plane `/health` and `/ready` checks, operator API exchange, owner P2P requirement, confirmation
+action, durable event delivery and failure/recovery paths must be evidenced together.
 
 ## Topology
 

@@ -372,3 +372,10 @@ and complete [feishu-autodev-app-setup.md](feishu-autodev-app-setup.md) before a
 git checkout before registering it. Use a separate PostgreSQL database, DBOS system database,
 `AUTODEV_STATE_ROOT`, Docker image/container names and bridge SQLite file. Do not register it in
 the production database and remove the copied checkout and temporary resources after the run.
+The target's current immutable image definition and verification contract are maintained in
+[acceptance/target/README.md](../acceptance/target/README.md).
+
+The current acceptance image intentionally uses a fixed official Python 3.14.7 Alpine amd64
+digest and an upstream-fixed zlib package. Because the base reference is already immutable, the
+acceptance build should not silently replace it with a floating tag; rebuild from the recorded
+Dockerfile and rerun Syft plus `grype --fail-on high` when the target definition changes.
