@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from pathlib import Path
 
@@ -208,12 +207,6 @@ def bootstrap_runtime(settings: RuntimeSettings, manifest_path: Path) -> dict[st
         "deployment_id": release.deployment_id,
         "base_url": runtime.base_url,
     }
-
-
-def load_bootstrap_manifest(path: Path) -> BootstrapManifest:
-    return BootstrapManifest.model_validate(
-        json.loads(path.resolve(strict=True).read_text(encoding="utf-8"))
-    )
 
 
 def _upgrade_database(settings: RuntimeSettings) -> None:
