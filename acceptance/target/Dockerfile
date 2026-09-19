@@ -1,7 +1,11 @@
 FROM public.ecr.aws/amazonlinux/amazonlinux:2023-minimal@sha256:68b1e82cd69ade271c092bc1959fa6fc820945d0c8dbb7a88cf6c1824a184688 AS builder
 
 RUN dnf -y install python3.14 python3.14-pip \
-    && dnf -y --installroot=/runtime --use-host-config --releasever=2023 \
+    && dnf -y --installroot=/runtime --releasever=2023 \
+      --config=/etc/dnf/dnf.conf --noplugins \
+      --setopt=cachedir=/var/cache/dnf \
+      --setopt=reposdir=/etc/yum.repos.d \
+      --setopt=varsdir=/etc/dnf/vars \
       --setopt=install_weak_deps=0 \
       install python3.14 \
     && dnf clean all
