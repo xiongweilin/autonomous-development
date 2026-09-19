@@ -39,11 +39,23 @@ class PostPromotionSoakWorkflow(DBOSConfiguredInstance):
 
         while True:
             decision_operation_id = f"{operation_id}:decision:{round_index}"
-            decision_doc = self._observe_step(
-                cycle_id,
-                route_operation_id=f"{operation_id}:route",
-                decision_operation_id=decision_operation_id,
-            )
+            try:
+                decision_doc = self._observe_step(
+                    cycle_id,
+                    route_operation_id=f"{operation_id}:route",
+                    decision_operation_id=decision_operation_id,
+                )
+            except Exception as exc:
+                cycle_doc = self._rollback_unobserved_step(
+                    cycle_id,
+                    effect_operation_id=f"{operation_id}:unobserved-rollback",
+                )
+                return {
+                    "cycle": cycle_doc,
+                    "decision": None,
+                    "status": _string(cycle_doc, "state"),
+                    "reason": f"soak observation failed closed: {type(exc).__name__}",
+                }
             decision = _decision_from_document(decision_doc)
             cycle_doc = self._apply_step(
                 cycle_id,
@@ -80,6 +92,19 @@ class PostPromotionSoakWorkflow(DBOSConfiguredInstance):
             decision_operation_id=decision_operation_id,
         )
         return _decision_document(decision)
+
+    @DBOS.step(retries_allowed=False)
+    def _rollback_unobserved_step(
+        self,
+        cycle_id: str,
+        *,
+        effect_operation_id: str,
+    ) -> dict[str, object]:
+        cycle = self._service.rollback_unobserved(
+            cycle_id,
+            effect_operation_id=effect_operation_id,
+        )
+        return _cycle_document(cycle)
 
     @DBOS.step(retries_allowed=False)
     def _apply_step(
