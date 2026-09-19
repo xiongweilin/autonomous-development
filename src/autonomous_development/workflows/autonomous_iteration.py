@@ -159,6 +159,7 @@ class AutonomousIterationWorkflow(DBOSConfiguredInstance):
                 cycle_id,
                 operation_id=f"{operation_id}:pre-verification-reject",
             )
+            self._best_effort_cleanup(cycle_id, deployment_id=None)
             return _terminal_result(cycle_doc, "pre-deployment verification failed")
 
         self._verified_step(cycle_id, pre_verification.id, operation_id)
@@ -203,6 +204,10 @@ class AutonomousIterationWorkflow(DBOSConfiguredInstance):
             cycle_doc = self._reject_step(
                 cycle_id,
                 operation_id=f"{operation_id}:performance-reject",
+            )
+            self._best_effort_cleanup(
+                cycle_id,
+                deployment_id=f"{cycle_id}-candidate",
             )
             return _terminal_result(cycle_doc, "post-deployment performance gate failed")
 
@@ -249,6 +254,10 @@ class AutonomousIterationWorkflow(DBOSConfiguredInstance):
                 canary_round += 1
                 continue
             if decision.kind is CanaryDecisionKind.ROLLBACK:
+                self._best_effort_cleanup(
+                    cycle_id,
+                    deployment_id=f"{cycle_id}-candidate",
+                )
                 return _terminal_result(cycle_doc, "canary regression rolled back")
             if decision.kind is CanaryDecisionKind.PROMOTION_READY:
                 break
@@ -686,9 +695,45 @@ class AutonomousIterationWorkflow(DBOSConfiguredInstance):
             cycle_id,
             operation_id=f"{operation_id}:failed:{phase}",
         )
+        deployment_id = (
+            f"{cycle_id}-candidate"
+            if phase in {"deployment", "performance", "canary"}
+            else None
+        )
+        self._best_effort_cleanup(cycle_id, deployment_id=deployment_id)
         return _terminal_result(
             cycle_doc,
             f"{phase} failed closed: {type(error).__name__}",
+        )
+
+    def _best_effort_cleanup(
+        self,
+        cycle_id: str,
+        *,
+        deployment_id: str | None,
+    ) -> None:
+        try:
+            self._cleanup_step(cycle_id, deployment_id)
+        except Exception:
+            pass
+
+    @DBOS.step(
+        retries_allowed=True,
+        max_attempts=3,
+        interval_seconds=1.0,
+        backoff_rate=2.0,
+    )
+    def _cleanup_step(
+        self,
+        cycle_id: str,
+        deployment_id: str | None,
+    ) -> None:
+        if deployment_id is not None:
+            self._deployment.stop(deployment_id)
+        self._source_promotion.cleanup_cycle(
+            repository_root=self._repository_root,
+            worktree_root=self._worktree_root,
+            cycle_id=cycle_id,
         )
 
     @DBOS.step(retries_allowed=False)
