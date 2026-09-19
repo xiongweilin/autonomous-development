@@ -102,6 +102,9 @@ class PostPromotionSoakService:
                 candidate_base_url=candidate_runtime.base_url,
                 candidate_weight_percent=100,
                 operation_id=route_operation_id,
+                target_id=cycle.target_id,
+                control_release_id=cycle.baseline_release_id,
+                candidate_deployment_id=cycle.candidate_deployment_id,
             )
         )
         evidence = self._observer.observe(
@@ -149,10 +152,26 @@ class PostPromotionSoakService:
 
         if decision.kind is not SoakDecisionKind.ROLLBACK:
             raise RuntimeError(f"unsupported soak decision: {decision.kind.value}")
+        return self._rollback_to_baseline(cycle, effect_operation_id)
+
+    def rollback_unobserved(
+        self,
+        cycle_id: str,
+        *,
+        effect_operation_id: str,
+    ) -> DevelopmentCycle:
+        cycle = self._cycles.get(cycle_id)
         if cycle.state is CycleState.ROLLED_BACK:
             return cycle
         if cycle.state is not CycleState.SOAKING:
-            raise ValueError("rollback decision requires a soaking cycle")
+            raise ValueError("unobserved soak rollback requires a soaking cycle")
+        return self._rollback_to_baseline(cycle, effect_operation_id)
+
+    def _rollback_to_baseline(
+        self,
+        cycle: DevelopmentCycle,
+        effect_operation_id: str,
+    ) -> DevelopmentCycle:
         if cycle.experiment_id is None:
             raise ValueError("soaking cycle has no experiment identity")
 
