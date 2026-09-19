@@ -113,7 +113,10 @@ def downgrade() -> None:
     op.drop_table("human_interventions")
     op.drop_index("ix_requirement_analyses_request_id", table_name="requirement_analyses")
     op.drop_table("requirement_analyses")
-    op.drop_index("ix_development_requests_pending_intervention_id", table_name="development_requests")
+    op.drop_index(
+        "ix_development_requests_pending_intervention_id",
+        table_name="development_requests",
+    )
     op.drop_index("ix_development_requests_cycle_id", table_name="development_requests")
     op.drop_index("ix_development_requests_status", table_name="development_requests")
     op.drop_index("ix_development_requests_created_at", table_name="development_requests")
