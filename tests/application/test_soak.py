@@ -27,6 +27,8 @@ class FakeReleaseRuntime:
     def __init__(self, catalog: ReleaseCatalogService) -> None:
         self.catalog = catalog
         self.calls: list[str] = []
+        self.stopped_deployments: list[str] = []
+        self.stopped_releases: list[str] = []
 
     def resolve(self, release_id: str):
         from autonomous_development.ports.deployment import DeploymentRuntime
@@ -46,6 +48,24 @@ class FakeReleaseRuntime:
         if release is None:
             raise ValueError("missing serving release")
         return release, self.resolve(release.id)
+
+    def stop_deployment(self, deployment_id: str) -> None:
+        self.stopped_deployments.append(deployment_id)
+
+    def stop_release(self, release_id: str) -> None:
+        self.stopped_releases.append(release_id)
+
+
+class FakeSourcePromotion:
+    def __init__(self) -> None:
+        self.restored: list[str] = []
+        self.cleaned: list[str] = []
+
+    def restore_baseline(self, **kwargs: object) -> None:
+        self.restored.append(str(kwargs["baseline_commit"]))
+
+    def cleanup_cycle(self, **kwargs: object) -> None:
+        self.cleaned.append(str(kwargs["cycle_id"]))
 
 
 class FakeTraffic:
@@ -151,7 +171,9 @@ def promoted_cycle() -> DevelopmentCycle:
     )
 
 
-def test_soak_regression_restores_baseline_traffic_and_serving_release() -> None:
+def test_soak_regression_restores_baseline_traffic_and_serving_release(
+    tmp_path,
+) -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     metadata.create_all(engine)
     cycles = CycleService(SqlCycleRepository(engine))
@@ -166,6 +188,7 @@ def test_soak_regression_restores_baseline_traffic_and_serving_release() -> None
     traffic = FakeTraffic()
     observer = RegressionObserver()
     runtime = FakeReleaseRuntime(catalog)
+    source = FakeSourcePromotion()
     service = PostPromotionSoakService(
         cycles,
         traffic,
@@ -173,6 +196,10 @@ def test_soak_regression_restores_baseline_traffic_and_serving_release() -> None
         catalog,
         SqlSoakDecisionRepository(engine),
         runtime,  # type: ignore[arg-type]
+        source,  # type: ignore[arg-type]
+        repository_root=tmp_path.resolve(),
+        worktree_root=(tmp_path / "worktrees").resolve(),
+        default_branch="main",
     )
     soaking = service.start("cycle-1", operation_id="soak:start")
     assert soaking.state is CycleState.SOAKING
@@ -198,6 +225,9 @@ def test_soak_regression_restores_baseline_traffic_and_serving_release() -> None
     assert traffic.restored == ["soak:effect:0:traffic"]
     assert traffic.applied[0].control_base_url == "http://127.0.0.1:4100"
     assert traffic.applied[0].candidate_base_url == "http://127.0.0.1:4200"
+    assert source.restored == ["a" * 40]
+    assert source.cleaned == ["cycle-1"]
+    assert runtime.stopped_deployments == ["deployment-1"]
 
     replay = service.apply(
         "cycle-1",
