@@ -20,7 +20,11 @@ from autonomous_development.domain.models import (
     DevelopmentCycle,
     ReleasedVersion,
 )
-from autonomous_development.ports.traffic import TrafficRouteState, TrafficSplit
+from autonomous_development.ports.traffic import (
+    TrafficRouteSnapshot,
+    TrafficRouteState,
+    TrafficSplit,
+)
 
 
 class FakeReleaseRuntime:
@@ -73,6 +77,8 @@ class FakeTraffic:
         self.applied: list[TrafficSplit] = []
         self.restored: list[str] = []
         self._states: dict[str, TrafficRouteState] = {}
+        self._current_split: TrafficSplit | None = None
+        self._current_state: TrafficRouteState | None = None
 
     def apply(self, split: TrafficSplit) -> TrafficRouteState:
         existing = self._states.get(split.operation_id)
@@ -87,7 +93,28 @@ class FakeTraffic:
             evidence_ref=f"traffic:{len(self._states) + 1}",
         )
         self._states[split.operation_id] = state
+        self._current_split = split
+        self._current_state = state
         return state
+
+    def read_current(self) -> TrafficRouteSnapshot | None:
+        if self._current_split is None or self._current_state is None:
+            return None
+        split = self._current_split
+        state = self._current_state
+        return TrafficRouteSnapshot(
+            experiment_id=split.experiment_id,
+            stage_index=split.stage_index,
+            control_base_url=split.control_base_url,
+            candidate_base_url=split.candidate_base_url,
+            candidate_weight_percent=split.candidate_weight_percent,
+            operation_id=split.operation_id,
+            generation=state.generation,
+            evidence_ref=state.evidence_ref,
+            target_id=split.target_id,
+            control_release_id=split.control_release_id,
+            candidate_deployment_id=split.candidate_deployment_id,
+        )
 
     def restore_control(
         self,
@@ -107,6 +134,9 @@ class FakeTraffic:
                 candidate_base_url=candidate_base_url,
                 candidate_weight_percent=0,
                 operation_id=operation_id,
+                target_id="target-1",
+                control_release_id="release-0",
+                candidate_deployment_id="deployment-1",
             )
         )
 
