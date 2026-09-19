@@ -27,8 +27,9 @@ class FeedbackRequest(BaseModel):
 class FeedbackResponse(BaseModel):
     feedback_id: str
     target_id: str
-    release_id: str
-    deployment_id: str
+    release_id: str | None
+    deployment_id: str | None
+    experiment_id: str | None
     received_at: datetime
 
 
@@ -56,13 +57,14 @@ def create_feedback_router(service: FeedbackService) -> APIRouter:
         except FeedbackAttributionError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-        if feedback.release_id is None or feedback.deployment_id is None:
+        if not feedback.attributable:
             raise RuntimeError("feedback API accepted unattributable feedback")
         return FeedbackResponse(
             feedback_id=feedback.id,
             target_id=feedback.target_id,
             release_id=feedback.release_id,
             deployment_id=feedback.deployment_id,
+            experiment_id=feedback.experiment_id,
             received_at=feedback.received_at,
         )
 
