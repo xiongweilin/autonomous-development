@@ -16,6 +16,7 @@ from autonomous_development.domain.models import (
     ProductObjectiveRevision,
     ReleaseDecision,
     ReleasedVersion,
+    RequestAttribution,
     UserFeedback,
 )
 from autonomous_development.domain.soak import PostPromotionSoakDecision
@@ -165,10 +166,16 @@ class FeedbackRepository(Protocol):
         target_id: str,
         release_id: str,
         *,
+        deployment_id: str,
         opened_at: datetime,
         closed_at: datetime,
     ) -> tuple[UserFeedback, ...]: ...
 
+
+class RequestAttributionRepository(Protocol):
+    def add(self, attribution: RequestAttribution) -> RequestAttribution: ...
+
+    def get(self, request_ref: str) -> RequestAttribution | None: ...
 
 
 class EvidenceWindowRepository(Protocol):
