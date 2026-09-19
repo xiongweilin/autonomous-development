@@ -163,6 +163,7 @@ class ChangeProposal:
     max_implementation_attempts: int
     mandatory_gates: tuple[str, ...]
     change_intent: str | None = None
+    max_changed_files: int = 50
 
     def __post_init__(self) -> None:
         for field_name, value in (
@@ -177,6 +178,8 @@ class ChangeProposal:
             raise ValueError("proposal requires acceptance criteria, scope and mandatory gates")
         if self.max_implementation_attempts < 1:
             raise ValueError("implementation attempt budget must be positive")
+        if self.max_changed_files < 1:
+            raise ValueError("changed-file budget must be positive")
         if self.diagnosis_id is not None and (
             self.change_intent is None or not self.change_intent.strip()
         ):
