@@ -6,5 +6,6 @@ production database. The acceptance runbook creates a separate PostgreSQL databa
 DBOS system state, state root, Docker image and serving release for this target.
 
 The image uses pinned Chainguard Python builder and runtime digests. Dependencies are installed
-in the matching builder image and copied into the non-root runtime image so the final artifact
-can pass the configured Grype `high` threshold without weakening the security gate.
+as root only in the disposable builder stage and copied into the explicit non-root UID 65532
+runtime image, so the final artifact can pass the configured Grype `high` threshold without
+weakening the security gate.

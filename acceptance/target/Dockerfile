@@ -2,6 +2,7 @@ FROM cgr.dev/chainguard/python@sha256:dc0368ac6a4792f563e7f523d207f6c5ed17e3d7ed
 
 WORKDIR /build
 COPY requirements.txt .
+USER 0
 RUN python -m pip install --no-cache-dir --disable-pip-version-check \
     --target /build/site-packages \
     -r requirements.txt
@@ -13,6 +14,7 @@ COPY --from=builder /build/site-packages /opt/site-packages
 COPY app.py .
 
 ENV PYTHONPATH=/opt/site-packages
+USER 65532
 
 EXPOSE 8000
 CMD ["-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
