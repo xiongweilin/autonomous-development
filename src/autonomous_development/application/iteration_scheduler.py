@@ -161,6 +161,8 @@ class FeedbackIterationSchedulerService:
         contract = self._contracts.load(str(repository_root))
         if contract.target_id != target.id:
             raise ValueError("target contract identity does not match registered target")
+        if contract.revision != target.target_contract_revision:
+            raise ValueError("target contract revision does not match registered target")
 
         try:
             prepared = self._iterations.prepare_from_evidence(
