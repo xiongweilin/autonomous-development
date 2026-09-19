@@ -1,4 +1,4 @@
-FROM python:3.14.7-alpine3.24 AS builder
+FROM python:3.14.7-slim-trixie AS builder
 
 WORKDIR /build
 COPY requirements.txt .
@@ -6,7 +6,7 @@ RUN python -m pip install --no-cache-dir --disable-pip-version-check \
     --target /build/site-packages \
     -r requirements.txt
 
-FROM dhi.io/python:3.14.7-alpine3.24@sha256:7b9528fefc51c9d3753ccd25dcf1dea9dd327e7c2f8bef89cd2cf3b34f847408
+FROM dhi.io/python:3.14.7-debian13@sha256:71245bfb85e3632288e5f9816dd9fb809e65b10e1e20f25bedf4d1a92b0a4ddd
 
 WORKDIR /app
 COPY --from=builder /build/site-packages /opt/site-packages
