@@ -146,6 +146,7 @@ def compose_runtime(settings: RuntimeSettings) -> RuntimeComposition:
         pool_pre_ping=True,
     )
     evidence_store = LocalEvidenceStore(settings.evidence_root)
+    traffic = AtomicFileTrafficDirector(settings.traffic_state_root, evidence_store)
     runner = SubprocessRunner()
     repository = GitCliRepository()
     contract_loader = TomlTargetContractLoader()
@@ -164,6 +165,7 @@ def compose_runtime(settings: RuntimeSettings) -> RuntimeComposition:
         releases,
         feedback_repository,
         attribution_repository,
+        traffic,
     )
 
     registered = targets.list_targets()
@@ -256,7 +258,6 @@ def compose_runtime(settings: RuntimeSettings) -> RuntimeComposition:
         contract,
     )
     experiments = ExperimentService(SqlExperimentRepository(engine))
-    traffic = AtomicFileTrafficDirector(settings.traffic_state_root, evidence_store)
     canary_observer = ProxyCanaryObserver(
         settings.canary_proxy_base_url,
         evidence_store,
