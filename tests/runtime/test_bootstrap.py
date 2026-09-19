@@ -13,6 +13,8 @@ from autonomous_development.adapters.postgres.target_registry import (
     SqlObjectiveRepository,
     SqlTargetRepository,
 )
+from autonomous_development.adapters.evidence.local import LocalEvidenceStore
+from autonomous_development.adapters.traffic.file import AtomicFileTrafficDirector
 from autonomous_development.application.release_catalog import ReleaseCatalogService
 from autonomous_development.application.target_registry import TargetRegistryService
 from autonomous_development.domain.enums import DeploymentState
@@ -204,6 +206,17 @@ def test_bootstrap_migrates_registers_and_observes_baseline(
     assert first["status"] == "bootstrapped"
     assert first["source_commit"] == _run(root, "rev-parse", "HEAD")
     assert str(first["target_contract_revision"]).startswith("sha256:")
+
+    route = AtomicFileTrafficDirector(
+        settings.traffic_state_root,
+        LocalEvidenceStore(settings.evidence_root),
+    ).read_current()
+    assert route is not None
+    assert route.target_id == "target-1"
+    assert route.control_release_id == "release-1"
+    assert route.candidate_deployment_id == "deployment-1"
+    assert route.candidate_weight_percent == 0
+    assert route.control_base_url == route.candidate_base_url
 
     engine = create_engine(settings.database_url.get_secret_value())
     try:
