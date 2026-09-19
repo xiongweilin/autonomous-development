@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -147,6 +148,14 @@ class Runtime:
         )
 
 
+class SourcePromotion:
+    def restore_baseline(self, **kwargs) -> None:
+        del kwargs
+
+    def cleanup_cycle(self, **kwargs) -> None:
+        del kwargs
+
+
 class Traffic:
     def apply(self, split):
         raise AssertionError(f"traffic should not be applied: {split}")
@@ -174,6 +183,10 @@ def service(
         Releases(serving or release("release-1", "deployment-1")),  # type: ignore[arg-type]
         Decisions(receipt),  # type: ignore[arg-type]
         Runtime(serving_deployment_id=serving_deployment_id),  # type: ignore[arg-type]
+        SourcePromotion(),  # type: ignore[arg-type]
+        repository_root=Path.cwd().resolve(),
+        worktree_root=(Path.cwd() / ".autodev-test-worktrees").resolve(),
+        default_branch="main",
     )
 
 
