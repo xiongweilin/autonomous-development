@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 
 import uvicorn
 
+from autonomous_development.runtime.bootstrap import bootstrap_runtime
 from autonomous_development.runtime.composition import compose_runtime
 from autonomous_development.runtime.config import RuntimeSettings
 
@@ -14,9 +16,24 @@ def main() -> None:
     subcommands = parser.add_subparsers(dest="command", required=True)
     subcommands.add_parser("serve", help="run the local V1 control plane")
     subcommands.add_parser("ready", help="run live local readiness probes")
+    bootstrap = subcommands.add_parser(
+        "bootstrap",
+        help="migrate and register the single V1 target from a manifest",
+    )
+    bootstrap.add_argument(
+        "--manifest",
+        required=True,
+        type=Path,
+        help="absolute or relative path to the bootstrap JSON manifest",
+    )
     arguments = parser.parse_args()
 
     settings = RuntimeSettings.from_environment()
+    if arguments.command == "bootstrap":
+        result = bootstrap_runtime(settings, arguments.manifest)
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+        return
+
     runtime = compose_runtime(settings)
     if arguments.command == "ready":
         try:
