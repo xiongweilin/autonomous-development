@@ -4,11 +4,11 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from alembic import command
 from alembic.config import Config
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import create_engine
 
+from alembic import command
 from autonomous_development.adapters.docker_cli.deployment import DockerDeploymentProvider
 from autonomous_development.adapters.evidence.local import LocalEvidenceStore
 from autonomous_development.adapters.git_cli.repository import GitCliRepository
@@ -22,13 +22,13 @@ from autonomous_development.adapters.process.subprocess_runner import Subprocess
 from autonomous_development.adapters.target_contract.toml import TomlTargetContractLoader
 from autonomous_development.application.release_catalog import ReleaseCatalogService
 from autonomous_development.application.target_registry import TargetRegistryService
+from autonomous_development.domain.enums import DeploymentState
 from autonomous_development.domain.models import (
     DevelopmentTarget,
     MutationPolicy,
     ProductObjectiveRevision,
     ReleasedVersion,
 )
-from autonomous_development.domain.enums import DeploymentState
 from autonomous_development.ports.deployment import DeploymentSpec
 from autonomous_development.runtime.config import RuntimeSettings
 
