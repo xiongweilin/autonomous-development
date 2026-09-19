@@ -42,3 +42,6 @@ class DeploymentService:
             timeout_seconds=contract.deployment.startup_timeout_seconds,
         )
         return runtime, deployment
+
+    def stop(self, deployment_id: str) -> None:
+        self._provider.stop(deployment_id)
