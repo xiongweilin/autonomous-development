@@ -27,10 +27,10 @@ jobs:
           docker image inspect acceptance-probe:alpine \
             --format 'size_bytes={{.Size}} id={{.Id}}'
 
-      - name: Confirm musl runtime
+      - name: Confirm Python runtime
         run: |
           docker run --rm acceptance-probe:alpine \
-            /bin/sh -c 'ldd --version 2>&1 | head -n 2'
+            python3 -c 'import platform,sys; print(sys.version); print(platform.platform())'
 
       - name: Smoke health and readiness
         run: |
