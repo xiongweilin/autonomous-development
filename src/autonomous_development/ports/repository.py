@@ -74,4 +74,12 @@ class RepositoryProvider(Protocol):
         candidate_tree: str,
     ) -> CandidateCommit: ...
 
+    def restore_baseline(
+        self,
+        repository_root: Path,
+        default_branch: str,
+        *,
+        baseline_commit: str,
+    ) -> RepositoryBaseline: ...
+
     def remove_worktree(self, baseline: RepositoryBaseline, worktree: Worktree) -> None: ...
