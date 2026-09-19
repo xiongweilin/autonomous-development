@@ -134,7 +134,7 @@ def create_canary_proxy(
             key: value
             for key, value in request.headers.items()
             if key.lower() not in _HOP_BY_HOP_HEADERS
-            and key.lower() not in {_SESSION_HEADER, "cookie"}
+            and key.lower() != _SESSION_HEADER
         }
         body = await request.body()
         started = time.monotonic()
