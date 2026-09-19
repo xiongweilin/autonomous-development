@@ -47,6 +47,12 @@ class Runner:
         )
 
 
+
+
+class EmptyTraffic:
+    def read_current(self):
+        return None
+
 class Contracts:
     def load(self, repository_root: str) -> TargetContract:
         del repository_root
@@ -225,3 +231,30 @@ def test_readiness_fails_closed_without_telemetry_queries(
     assert not report.ready
     prometheus = next(check for check in report.checks if check.name == "prometheus")
     assert prometheus.detail == "no telemetry queries configured"
+
+
+def test_readiness_fails_closed_without_active_product_route(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    engine, targets, releases = runtime_state(tmp_path)
+    monkeypatch.setattr(
+        "autonomous_development.runtime.readiness.shutil.which",
+        lambda command: f"/bin/{command}",
+    )
+
+    service = RuntimeReadinessService(
+        settings=configured(tmp_path),
+        engine=engine,  # type: ignore[arg-type]
+        targets=targets,
+        releases=releases,
+        contracts=Contracts(),  # type: ignore[arg-type]
+        runner=Runner(),  # type: ignore[arg-type]
+        traffic=EmptyTraffic(),  # type: ignore[arg-type]
+        http_transport=httpx.MockTransport(lambda request: httpx.Response(200)),
+    )
+    report = service.check()
+
+    assert not report.ready
+    proxy = next(check for check in report.checks if check.name == "canary-proxy")
+    assert proxy.detail == "no active product route"
