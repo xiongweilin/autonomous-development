@@ -12,6 +12,7 @@ from autonomous_development.application.target_registry import TargetRegistrySer
 from autonomous_development.ports.process import CommandRequest, ProcessRunner
 from autonomous_development.ports.readiness import ReadinessCheck, ReadinessReport
 from autonomous_development.ports.target_contract import TargetContractLoader
+from autonomous_development.ports.traffic import TrafficRouteReader
 
 from .config import RuntimeSettings
 
@@ -26,6 +27,7 @@ class RuntimeReadinessService:
         releases: ReleaseCatalogService,
         contracts: TargetContractLoader,
         runner: ProcessRunner,
+        traffic: TrafficRouteReader | None = None,
         http_transport: httpx.BaseTransport | None = None,
     ) -> None:
         self._settings = settings
@@ -34,6 +36,7 @@ class RuntimeReadinessService:
         self._releases = releases
         self._contracts = contracts
         self._runner = runner
+        self._traffic = traffic
         self._http_transport = http_transport
 
     def check(self) -> ReadinessReport:
@@ -169,6 +172,30 @@ class RuntimeReadinessService:
         )
 
     def _canary_proxy(self) -> ReadinessCheck:
+        if self._traffic is not None:
+            try:
+                route = self._traffic.read_current()
+                if route is None:
+                    return ReadinessCheck(
+                        "canary-proxy",
+                        False,
+                        "no active product route",
+                    )
+                targets = self._targets.list_targets()
+                if len(targets) != 1 or route.target_id != targets[0].id:
+                    return ReadinessCheck(
+                        "canary-proxy",
+                        False,
+                        "active product route is not bound to the registered target",
+                    )
+                if route.control_release_id is None or route.candidate_deployment_id is None:
+                    return ReadinessCheck(
+                        "canary-proxy",
+                        False,
+                        "active product route lacks attribution identity",
+                    )
+            except Exception as exc:
+                return ReadinessCheck("canary-proxy", False, type(exc).__name__)
         return self._http(
             "canary-proxy",
             self._settings.canary_proxy_base_url + "/__autodev/metrics/0",
