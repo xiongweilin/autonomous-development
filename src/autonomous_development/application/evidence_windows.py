@@ -66,6 +66,7 @@ class EvidenceWindowService:
                 feedback_ids,
                 target_id=target_id,
                 release_id=serving.id,
+                deployment_id=serving.deployment_id,
                 opened_at=opened_at,
                 closed_at=closed_at,
             )
@@ -73,6 +74,7 @@ class EvidenceWindowService:
             else self._feedback.list_attributable(
                 target_id,
                 serving.id,
+                deployment_id=serving.deployment_id,
                 opened_at=opened_at,
                 closed_at=closed_at,
             )
@@ -106,6 +108,7 @@ class EvidenceWindowService:
         *,
         target_id: str,
         release_id: str,
+        deployment_id: str,
         opened_at: datetime,
         closed_at: datetime,
     ) -> tuple[UserFeedback, ...]:
@@ -114,7 +117,10 @@ class EvidenceWindowService:
             item = self._feedback.get(feedback_id)
             if item is None:
                 raise ValueError(f"feedback does not exist: {feedback_id}")
-            if item.target_id != target_id or item.release_id != release_id:
+            if item.target_id != target_id or (
+                item.release_id != release_id
+                and item.deployment_id != deployment_id
+            ):
                 raise ValueError("feedback is not attributable to the serving release")
             if not opened_at <= item.received_at <= closed_at:
                 raise ValueError("feedback is outside the requested evidence window")
