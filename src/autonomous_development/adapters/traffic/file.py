@@ -62,6 +62,9 @@ class AtomicFileTrafficDirector(TrafficDirector):
                     "candidate_weight_percent": split.candidate_weight_percent,
                     "operation_id": split.operation_id,
                     "generation": generation,
+                    "target_id": split.target_id,
+                    "control_release_id": split.control_release_id,
+                    "candidate_deployment_id": split.candidate_deployment_id,
                 },
             )
             state = TrafficRouteState(
@@ -70,6 +73,9 @@ class AtomicFileTrafficDirector(TrafficDirector):
                 candidate_weight_percent=split.candidate_weight_percent,
                 generation=generation,
                 evidence_ref=evidence_ref,
+                target_id=split.target_id,
+                control_release_id=split.control_release_id,
+                candidate_deployment_id=split.candidate_deployment_id,
             )
             document = {
                 **asdict(split),
@@ -233,6 +239,11 @@ def _snapshot_from_document(document: dict[str, Any]) -> TrafficRouteSnapshot:
             operation_id=str(document["operation_id"]),
             generation=int(document["generation"]),
             evidence_ref=str(document["evidence_ref"]),
+            target_id=_optional_string(document.get("target_id")),
+            control_release_id=_optional_string(document.get("control_release_id")),
+            candidate_deployment_id=_optional_string(
+                document.get("candidate_deployment_id")
+            ),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise RuntimeError("traffic route snapshot is malformed") from exc
