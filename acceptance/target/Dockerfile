@@ -2,7 +2,7 @@ FROM public.ecr.aws/amazonlinux/amazonlinux:2023-minimal@sha256:68b1e82cd69ade27
 
 RUN dnf -y install python3.14 python3.14-pip \
     && dnf -y --installroot=/runtime --releasever=2023 \
-      --setopt=install_weak_deps=False \
+      --setopt=install_weak_deps=0 \
       install python3.14 \
     && dnf clean all
 
