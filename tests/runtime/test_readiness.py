@@ -35,6 +35,8 @@ from autonomous_development.ports.target_contract import (
 from autonomous_development.runtime.config import RuntimeSettings
 from autonomous_development.runtime.readiness import RuntimeReadinessService
 
+CONTRACT_REVISION = "sha256:" + "d" * 64
+
 
 class Runner:
     def run(self, request: CommandRequest) -> CommandResult:
@@ -44,6 +46,12 @@ class Runner:
             stderr="",
         )
 
+
+
+
+class EmptyTraffic:
+    def read_current(self):
+        return None
 
 class Contracts:
     def load(self, repository_root: str) -> TargetContract:
@@ -80,6 +88,7 @@ class Contracts:
                 max_candidate_p95_latency_ms=250.0,
                 max_p95_latency_ratio=1.25,
             ),
+            revision=CONTRACT_REVISION,
         )
 
 
@@ -108,7 +117,7 @@ def runtime_state(tmp_path: Path) -> tuple[
         id="target-1",
         repository=str(tmp_path.resolve()),
         default_branch="main",
-        target_contract_revision="contract-1",
+        target_contract_revision=CONTRACT_REVISION,
         active_objective_revision_id="objective-1",
         mutation_policy=policy,
     )
@@ -222,3 +231,30 @@ def test_readiness_fails_closed_without_telemetry_queries(
     assert not report.ready
     prometheus = next(check for check in report.checks if check.name == "prometheus")
     assert prometheus.detail == "no telemetry queries configured"
+
+
+def test_readiness_fails_closed_without_active_product_route(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    engine, targets, releases = runtime_state(tmp_path)
+    monkeypatch.setattr(
+        "autonomous_development.runtime.readiness.shutil.which",
+        lambda command: f"/bin/{command}",
+    )
+
+    service = RuntimeReadinessService(
+        settings=configured(tmp_path),
+        engine=engine,  # type: ignore[arg-type]
+        targets=targets,
+        releases=releases,
+        contracts=Contracts(),  # type: ignore[arg-type]
+        runner=Runner(),  # type: ignore[arg-type]
+        traffic=EmptyTraffic(),  # type: ignore[arg-type]
+        http_transport=httpx.MockTransport(lambda request: httpx.Response(200)),
+    )
+    report = service.check()
+
+    assert not report.ready
+    proxy = next(check for check in report.checks if check.name == "canary-proxy")
+    assert proxy.detail == "no active product route"

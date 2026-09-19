@@ -6,7 +6,11 @@ from datetime import datetime
 from autonomous_development.application.release_catalog import ReleaseCatalogService
 from autonomous_development.domain.enums import FeedbackKind
 from autonomous_development.domain.models import UserFeedback
-from autonomous_development.ports.persistence import FeedbackRepository
+from autonomous_development.ports.persistence import (
+    FeedbackRepository,
+    RequestAttributionRepository,
+)
+from autonomous_development.ports.traffic import TrafficRouteReader
 
 
 class FeedbackAttributionError(ValueError):
@@ -33,29 +37,77 @@ class FeedbackService:
         self,
         releases: ReleaseCatalogService,
         repository: FeedbackRepository,
+        attributions: RequestAttributionRepository | None = None,
+        routes: TrafficRouteReader | None = None,
     ) -> None:
         self._releases = releases
         self._repository = repository
+        self._attributions = attributions
+        self._routes = routes
 
     def ingest(self, submission: FeedbackSubmission) -> UserFeedback:
-        serving = self._releases.serving(submission.target_id)
-        if serving is None:
-            raise FeedbackAttributionError(
-                f"target {submission.target_id} has no serving release"
-            )
+        release_id: str | None
+        deployment_id: str | None
+        experiment_id: str | None
+
+        attribution = (
+            self._attributions.get(submission.request_ref)
+            if self._attributions is not None and submission.request_ref is not None
+            else None
+        )
+        if self._attributions is not None and submission.request_ref is not None:
+            if attribution is None:
+                raise FeedbackAttributionError(
+                    "request reference has no server-side traffic attribution"
+                )
+            if attribution.target_id != submission.target_id:
+                raise FeedbackAttributionError(
+                    "request reference belongs to another target"
+                )
+            release_id = attribution.release_id
+            deployment_id = attribution.deployment_id
+            experiment_id = attribution.experiment_id
+            if release_id is not None:
+                release = self._releases.get(release_id)
+                if release.target_id != submission.target_id:
+                    raise FeedbackAttributionError(
+                        "attributed release belongs to another target"
+                    )
+                deployment_id = deployment_id or release.deployment_id
+        else:
+            serving = self._releases.serving(submission.target_id)
+            if serving is None:
+                raise FeedbackAttributionError(
+                    f"target {submission.target_id} has no serving release"
+                )
+            route = self._routes.read_current() if self._routes is not None else None
+            if (
+                route is not None
+                and route.target_id == submission.target_id
+                and route.candidate_weight_percent > 0
+                and route.candidate_deployment_id is not None
+                and route.candidate_deployment_id != serving.deployment_id
+            ):
+                raise FeedbackAttributionError(
+                    "request reference is required while candidate traffic is active"
+                )
+            release_id = serving.id
+            deployment_id = serving.deployment_id
+            experiment_id = None
+
         if (
             submission.reported_release_id is not None
-            and submission.reported_release_id != serving.id
+            and submission.reported_release_id != release_id
         ):
             raise FeedbackAttributionError(
-                "reported release does not match the server-side serving release"
+                "reported release does not match server-side attribution"
             )
         if (
             submission.reported_deployment_id is not None
-            and submission.reported_deployment_id != serving.deployment_id
+            and submission.reported_deployment_id != deployment_id
         ):
             raise FeedbackAttributionError(
-                "reported deployment does not match the server-side serving deployment"
+                "reported deployment does not match server-side attribution"
             )
 
         feedback = UserFeedback(
@@ -66,8 +118,9 @@ class FeedbackService:
             category=submission.category,
             severity=submission.severity,
             provenance=submission.provenance,
-            release_id=serving.id,
-            deployment_id=serving.deployment_id,
+            release_id=release_id,
+            deployment_id=deployment_id,
+            experiment_id=experiment_id,
             request_ref=submission.request_ref,
             free_text=submission.free_text,
         )

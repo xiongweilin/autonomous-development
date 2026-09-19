@@ -9,8 +9,13 @@ from autonomous_development.application.feedback import (
 )
 from autonomous_development.application.release_catalog import ReleaseCatalogService
 from autonomous_development.domain.enums import FeedbackKind
-from autonomous_development.domain.models import ReleasedVersion, UserFeedback
+from autonomous_development.domain.models import (
+    ReleasedVersion,
+    RequestAttribution,
+    UserFeedback,
+)
 from autonomous_development.ports.persistence import ServingReleaseReceipt
+from autonomous_development.ports.traffic import TrafficRouteSnapshot
 
 
 class MemoryReleaseRepository:
@@ -55,6 +60,26 @@ class MemoryReleaseRepository:
         self.operations[operation_id] = receipt
         self.serving_by_target[target_id] = release_id
         return receipt
+
+
+class MemoryAttributionRepository:
+    def __init__(self) -> None:
+        self.items: dict[str, RequestAttribution] = {}
+
+    def add(self, attribution: RequestAttribution) -> RequestAttribution:
+        self.items[attribution.request_ref] = attribution
+        return attribution
+
+    def get(self, request_ref: str) -> RequestAttribution | None:
+        return self.items.get(request_ref)
+
+
+class Routes:
+    def __init__(self, route: TrafficRouteSnapshot | None) -> None:
+        self.route = route
+
+    def read_current(self) -> TrafficRouteSnapshot | None:
+        return self.route
 
 
 class MemoryFeedbackRepository:
@@ -142,3 +167,78 @@ def test_feedback_free_text_is_bounded() -> None:
     service, _ = configured_service()
     with pytest.raises(ValueError, match="free text"):
         service.ingest(submission(free_text="x" * 4001))
+
+
+def test_candidate_feedback_uses_server_observed_request_attribution() -> None:
+    releases = ReleaseCatalogService(MemoryReleaseRepository())
+    releases.register(release())
+    releases.set_serving("target-1", "release-1", operation_id="serve-1")
+    attributions = MemoryAttributionRepository()
+    attributions.add(
+        RequestAttribution(
+            request_ref="request-candidate",
+            target_id="target-1",
+            observed_at=datetime.now(UTC),
+            arm="candidate",
+            experiment_id="experiment-1",
+            deployment_id="deployment-2",
+        )
+    )
+    service = FeedbackService(
+        releases,
+        MemoryFeedbackRepository(),
+        attributions,
+    )
+
+    feedback = service.ingest(
+        submission(
+            request_ref="request-candidate",
+            reported_deployment_id="deployment-2",
+        )
+    )
+
+    assert feedback.release_id is None
+    assert feedback.deployment_id == "deployment-2"
+    assert feedback.experiment_id == "experiment-1"
+
+
+def test_feedback_without_request_ref_is_rejected_during_active_candidate_traffic() -> None:
+    releases = ReleaseCatalogService(MemoryReleaseRepository())
+    releases.register(release())
+    releases.set_serving("target-1", "release-1", operation_id="serve-1")
+    route = TrafficRouteSnapshot(
+        experiment_id="experiment-1",
+        stage_index=0,
+        control_base_url="http://127.0.0.1:4100",
+        candidate_base_url="http://127.0.0.1:4200",
+        candidate_weight_percent=10,
+        operation_id="canary:1",
+        generation=1,
+        evidence_ref="traffic:1",
+        target_id="target-1",
+        control_release_id="release-1",
+        candidate_deployment_id="deployment-2",
+    )
+    service = FeedbackService(
+        releases,
+        MemoryFeedbackRepository(),
+        MemoryAttributionRepository(),
+        Routes(route),
+    )
+
+    with pytest.raises(FeedbackAttributionError, match="request reference is required"):
+        service.ingest(submission(request_ref=None))
+
+
+def test_unknown_request_reference_fails_closed_when_attribution_is_enabled() -> None:
+    releases = ReleaseCatalogService(MemoryReleaseRepository())
+    releases.register(release())
+    releases.set_serving("target-1", "release-1", operation_id="serve-1")
+    service = FeedbackService(
+        releases,
+        MemoryFeedbackRepository(),
+        MemoryAttributionRepository(),
+    )
+
+    with pytest.raises(FeedbackAttributionError, match="no server-side traffic attribution"):
+        service.ingest(submission(request_ref="unknown-request"))

@@ -140,12 +140,15 @@ class TargetContract:
     deployment: TargetDeploymentContract
     performance: TargetPerformanceContract
     canary: TargetCanaryContract
+    revision: str | None = None
 
     def __post_init__(self) -> None:
         if self.schema_version != 1:
             raise ValueError("unsupported target contract schema")
         if not self.target_id.strip():
             raise ValueError("target_id must be non-empty")
+        if self.revision is not None and not self.revision.startswith("sha256:"):
+            raise ValueError("target contract revision must be a sha256 digest")
 
     @property
     def mandatory_gates(self) -> tuple[str, ...]:

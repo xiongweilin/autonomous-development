@@ -33,6 +33,7 @@ from autonomous_development.domain.models import (
     ChangeProposal,
     Deployment,
     DevelopmentCycle,
+    ReleasedVersion,
     VerificationCheck,
     VerificationRun,
 )
@@ -47,7 +48,11 @@ from autonomous_development.ports.target_contract import (
     TargetVerificationContract,
     TargetVerificationGateContract,
 )
-from autonomous_development.ports.traffic import TrafficRouteState, TrafficSplit
+from autonomous_development.ports.traffic import (
+    TrafficRouteSnapshot,
+    TrafficRouteState,
+    TrafficSplit,
+)
 from autonomous_development.workflows.autonomous_iteration import (
     AutonomousIterationWorkflow,
 )
@@ -157,6 +162,7 @@ class FakeReleaseRuntime:
 class FakeDeployment:
     def __init__(self) -> None:
         self.calls = 0
+        self.stopped: list[str] = []
 
     def deploy_candidate(
         self,
@@ -184,6 +190,9 @@ class FakeDeployment:
                 observation_refs=("ready:1",),
             ),
         )
+
+    def stop(self, deployment_id: str) -> None:
+        self.stopped.append(deployment_id)
 
 
 class PassingPerformanceGate:
@@ -219,25 +228,58 @@ class FakePerformanceFactory:
 class FakeTraffic:
     def __init__(self) -> None:
         self.applied = 0
+        self.current: TrafficRouteSnapshot | None = None
 
     def apply(self, split: TrafficSplit) -> TrafficRouteState:
         self.applied += 1
-        return TrafficRouteState(
+        state = TrafficRouteState(
             experiment_id=split.experiment_id,
             stage_index=split.stage_index,
             candidate_weight_percent=split.candidate_weight_percent,
             generation=self.applied,
             evidence_ref=f"traffic:{self.applied}",
         )
+        self.current = TrafficRouteSnapshot(
+            experiment_id=split.experiment_id,
+            stage_index=split.stage_index,
+            control_base_url=split.control_base_url,
+            candidate_base_url=split.candidate_base_url,
+            candidate_weight_percent=split.candidate_weight_percent,
+            operation_id=split.operation_id,
+            generation=state.generation,
+            evidence_ref=state.evidence_ref,
+            target_id=split.target_id,
+            control_release_id=split.control_release_id,
+            candidate_deployment_id=split.candidate_deployment_id,
+        )
+        return state
+
+    def read_current(self) -> TrafficRouteSnapshot | None:
+        return self.current
 
     def restore_control(self, **kwargs: object) -> TrafficRouteState:
-        return TrafficRouteState(
+        state = TrafficRouteState(
             experiment_id=str(kwargs["experiment_id"]),
             stage_index=int(kwargs["stage_index"]),
             candidate_weight_percent=0,
             generation=self.applied + 1,
             evidence_ref="traffic:restore",
         )
+        assert self.current is not None
+        self.current = TrafficRouteSnapshot(
+            experiment_id=str(kwargs["experiment_id"]),
+            stage_index=int(kwargs["stage_index"]),
+            control_base_url=str(kwargs["control_base_url"]),
+            candidate_base_url=str(kwargs["candidate_base_url"]),
+            candidate_weight_percent=0,
+            operation_id=str(kwargs["operation_id"]),
+            generation=state.generation,
+            evidence_ref=state.evidence_ref,
+            target_id=self.current.target_id,
+            control_release_id=self.current.control_release_id,
+            candidate_deployment_id=self.current.candidate_deployment_id,
+        )
+        return state
 
 
 class PassingCanaryObserver:
@@ -271,8 +313,11 @@ class PassingCanaryObserver:
 
 
 class FakeSourcePromotion:
-    def __init__(self) -> None:
+    def __init__(self, *, fail_promote: bool = False) -> None:
         self.calls = 0
+        self.fail_promote = fail_promote
+        self.restored: list[str] = []
+        self.cleaned: list[str] = []
 
     def promote(
         self,
@@ -284,7 +329,15 @@ class FakeSourcePromotion:
         self.calls += 1
         assert repository_root.is_absolute()
         assert default_branch == "main"
+        if self.fail_promote:
+            raise RuntimeError("simulated source promotion failure")
         return candidate
+
+    def restore_baseline(self, **kwargs: object) -> None:
+        self.restored.append(str(kwargs["baseline_commit"]))
+
+    def cleanup_cycle(self, **kwargs: object) -> None:
+        self.cleaned.append(str(kwargs["cycle_id"]))
 
 
 def contract() -> TargetContract:
@@ -324,6 +377,19 @@ def contract() -> TargetContract:
             max_candidate_p95_latency_ms=250.0,
             max_p95_latency_ratio=1.25,
         ),
+    )
+
+
+def baseline_release() -> ReleasedVersion:
+    return ReleasedVersion(
+        id="release-0",
+        target_id="target-1",
+        source_commit="a" * 40,
+        source_tree="a" * 40,
+        artifact_digest="sha256:" + "0" * 64,
+        objective_revision_id="objective-1",
+        deployment_id="deployment-0",
+        promoted_at=datetime.now(UTC),
     )
 
 
@@ -375,6 +441,8 @@ def test_dbos_iteration_promotes_and_replay_does_not_repeat_effects(tmp_path: Pa
         SqlReleaseDecisionRepository(engine),
     )
     catalog = ReleaseCatalogService(SqlReleasedVersionRepository(engine))
+    catalog.register(baseline_release())
+    catalog.set_serving("target-1", "release-0", operation_id="serve-baseline")
     finalization = ReleaseFinalizationService(catalog)
     source_promotion = FakeSourcePromotion()
 
@@ -445,6 +513,103 @@ def test_dbos_iteration_promotes_and_replay_does_not_repeat_effects(tmp_path: Pa
         assert observer.calls == 1
         assert release_runtime.calls == ["release-0"]
         assert source_promotion.calls == 1
+    finally:
+        DBOS.destroy(workflow_completion_timeout_sec=5)
+        engine.dispose()
+
+
+def test_source_promotion_failure_compensates_to_baseline(tmp_path: Path) -> None:
+    app_database = tmp_path / "rollback-app.db"
+    system_database = tmp_path / "rollback-dbos.db"
+    engine = create_engine(f"sqlite+pysqlite:///{app_database}")
+    metadata.create_all(engine)
+
+    cycles = CycleService(SqlCycleRepository(engine))
+    cycles.create(
+        DevelopmentCycle(
+            id="cycle-1",
+            target_id="target-1",
+            objective_revision_id="objective-1",
+            baseline_release_id="release-0",
+            state=CycleState.CHANGE_PROPOSED,
+            change_proposal_id="proposal-1",
+        )
+    )
+    proposal_repository = SqlChangeProposalRepository(engine)
+    proposals = ProposalService(proposal_repository)
+    proposal_repository.add(proposal())
+
+    experiments = ExperimentService(SqlExperimentRepository(engine))
+    traffic = FakeTraffic()
+    observer = PassingCanaryObserver()
+    canary = CanaryService(traffic, observer, experiments)
+    releases = ReleaseService(
+        cycles,
+        experiments,
+        SqlReleaseDecisionRepository(engine),
+    )
+    catalog = ReleaseCatalogService(SqlReleasedVersionRepository(engine))
+    catalog.register(baseline_release())
+    catalog.set_serving("target-1", "release-0", operation_id="serve-baseline")
+    finalization = ReleaseFinalizationService(catalog)
+    source_promotion = FakeSourcePromotion(fail_promote=True)
+
+    worktree = (tmp_path / "rollback-worktree").resolve()
+    worktree.mkdir()
+    engineering = FakeEngineering(worktree)
+    verification = FakeVerification()
+    build = FakeBuild()
+    deployment = FakeDeployment()
+    release_runtime = FakeReleaseRuntime()
+    performance = FakePerformanceFactory()
+
+    config: DBOSConfig = {
+        "name": "autodev-rollback-test",
+        "application_version": "0.1.0",
+        "system_database_url": f"sqlite:///{system_database}",
+    }
+    DBOS(config=config)
+    workflow = AutonomousIterationWorkflow(
+        cycles=cycles,
+        proposals=proposals,
+        engineering=engineering,  # type: ignore[arg-type]
+        verification=verification,  # type: ignore[arg-type]
+        build=build,  # type: ignore[arg-type]
+        deployment=deployment,  # type: ignore[arg-type]
+        performance_gates=performance,
+        experiments=experiments,
+        canary=canary,
+        releases=releases,
+        finalization=finalization,
+        release_runtime=release_runtime,  # type: ignore[arg-type]
+        source_promotion=source_promotion,  # type: ignore[arg-type]
+        contract=contract(),
+        repository_root=tmp_path.resolve(),
+        worktree_root=(tmp_path / "rollback-worktrees").resolve(),
+        default_branch="main",
+        canary_hold_sleep_seconds=0.001,
+        config_name="test-autonomous-iteration-rollback",
+    )
+    DBOS.launch()
+    try:
+        with SetWorkflowID("cycle-1:source-promotion-failure"):
+            result = workflow.run(
+                "cycle-1",
+                "proposal-1",
+                "iteration-run-rollback",
+            )
+
+        assert result["status"] == CycleState.ROLLED_BACK.value
+        assert cycles.get("cycle-1").state is CycleState.ROLLED_BACK
+        serving = catalog.serving("target-1")
+        assert serving is not None
+        assert serving.id == "release-0"
+        assert traffic.current is not None
+        assert traffic.current.candidate_weight_percent == 0
+        assert source_promotion.calls == 1
+        assert source_promotion.restored == ["a" * 40]
+        assert source_promotion.cleaned == ["cycle-1"]
+        assert deployment.stopped == ["cycle-1-candidate"]
     finally:
         DBOS.destroy(workflow_completion_timeout_sec=5)
         engine.dispose()

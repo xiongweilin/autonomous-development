@@ -1,7 +1,5 @@
 from datetime import UTC, datetime, timedelta
 
-import pytest
-
 from autonomous_development.application.evidence_windows import EvidenceWindowService
 from autonomous_development.application.release_catalog import ReleaseCatalogService
 from autonomous_development.domain.enums import FeedbackKind
@@ -141,17 +139,45 @@ def test_missing_metric_is_explicit_not_success() -> None:
     assert window.missing_evidence == ("telemetry:latency",)
 
 
-def test_window_cannot_cross_current_release_promotion() -> None:
+def test_pre_promotion_candidate_feedback_window_is_allowed_without_future_telemetry() -> None:
     now = datetime.now(UTC)
-    releases = ReleaseCatalogService(Releases(release(now - timedelta(minutes=20))))
-    service = EvidenceWindowService(releases, Feedback(()), Telemetry(), Windows())
-    with pytest.raises(ValueError, match="may mix releases"):
-        service.close(
-            window_id="window-1",
-            target_id="target-1",
-            opened_at=now - timedelta(hours=1),
-            closed_at=now,
-        )
+    promoted_at = now - timedelta(minutes=20)
+    candidate_feedback = UserFeedback(
+        id="feedback-candidate",
+        target_id="target-1",
+        received_at=now - timedelta(minutes=30),
+        kind=FeedbackKind.EXPLICIT,
+        category="incorrect-result",
+        severity=4,
+        provenance="feedback-api",
+        release_id=None,
+        deployment_id="deployment-1",
+        experiment_id="experiment-1",
+    )
+
+    class UnexpectedTelemetry(Telemetry):
+        def collect(self, **kwargs) -> TelemetryEvidence:
+            raise AssertionError(f"future serving telemetry must not be queried: {kwargs}")
+
+    releases = ReleaseCatalogService(Releases(release(promoted_at)))
+    service = EvidenceWindowService(
+        releases,
+        Feedback((candidate_feedback,)),
+        UnexpectedTelemetry(),
+        Windows(),
+    )
+    window = service.close(
+        window_id="window-candidate",
+        target_id="target-1",
+        opened_at=now - timedelta(minutes=40),
+        closed_at=now - timedelta(minutes=25),
+        feedback_ids=("feedback-candidate",),
+    )
+
+    assert window.feedback_refs == ("feedback:feedback-candidate",)
+    assert window.missing_evidence == (
+        "telemetry:serving-release-not-yet-promoted",
+    )
 
 
 

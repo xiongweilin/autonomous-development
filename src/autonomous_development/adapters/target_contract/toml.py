@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -25,7 +26,8 @@ class TomlTargetContractLoader(TargetContractLoader):
 
     def load(self, repository_root: str) -> TargetContract:
         root = Path(repository_root).resolve(strict=True)
-        document = tomllib.loads((root / self._filename).read_text(encoding="utf-8"))
+        payload = (root / self._filename).read_bytes()
+        document = tomllib.loads(payload.decode("utf-8"))
         _exact_keys(
             document,
             {
@@ -101,6 +103,7 @@ class TomlTargetContractLoader(TargetContractLoader):
                 ),
                 max_p95_latency_ratio=_float(canary, "max_p95_latency_ratio"),
             ),
+            revision="sha256:" + hashlib.sha256(payload).hexdigest(),
         )
 
 

@@ -20,13 +20,19 @@ from autonomous_development.domain.models import (
     DevelopmentCycle,
     ReleasedVersion,
 )
-from autonomous_development.ports.traffic import TrafficRouteState, TrafficSplit
+from autonomous_development.ports.traffic import (
+    TrafficRouteSnapshot,
+    TrafficRouteState,
+    TrafficSplit,
+)
 
 
 class FakeReleaseRuntime:
     def __init__(self, catalog: ReleaseCatalogService) -> None:
         self.catalog = catalog
         self.calls: list[str] = []
+        self.stopped_deployments: list[str] = []
+        self.stopped_releases: list[str] = []
 
     def resolve(self, release_id: str):
         from autonomous_development.ports.deployment import DeploymentRuntime
@@ -47,12 +53,32 @@ class FakeReleaseRuntime:
             raise ValueError("missing serving release")
         return release, self.resolve(release.id)
 
+    def stop_deployment(self, deployment_id: str) -> None:
+        self.stopped_deployments.append(deployment_id)
+
+    def stop_release(self, release_id: str) -> None:
+        self.stopped_releases.append(release_id)
+
+
+class FakeSourcePromotion:
+    def __init__(self) -> None:
+        self.restored: list[str] = []
+        self.cleaned: list[str] = []
+
+    def restore_baseline(self, **kwargs: object) -> None:
+        self.restored.append(str(kwargs["baseline_commit"]))
+
+    def cleanup_cycle(self, **kwargs: object) -> None:
+        self.cleaned.append(str(kwargs["cycle_id"]))
+
 
 class FakeTraffic:
     def __init__(self) -> None:
         self.applied: list[TrafficSplit] = []
         self.restored: list[str] = []
         self._states: dict[str, TrafficRouteState] = {}
+        self._current_split: TrafficSplit | None = None
+        self._current_state: TrafficRouteState | None = None
 
     def apply(self, split: TrafficSplit) -> TrafficRouteState:
         existing = self._states.get(split.operation_id)
@@ -67,7 +93,28 @@ class FakeTraffic:
             evidence_ref=f"traffic:{len(self._states) + 1}",
         )
         self._states[split.operation_id] = state
+        self._current_split = split
+        self._current_state = state
         return state
+
+    def read_current(self) -> TrafficRouteSnapshot | None:
+        if self._current_split is None or self._current_state is None:
+            return None
+        split = self._current_split
+        state = self._current_state
+        return TrafficRouteSnapshot(
+            experiment_id=split.experiment_id,
+            stage_index=split.stage_index,
+            control_base_url=split.control_base_url,
+            candidate_base_url=split.candidate_base_url,
+            candidate_weight_percent=split.candidate_weight_percent,
+            operation_id=split.operation_id,
+            generation=state.generation,
+            evidence_ref=state.evidence_ref,
+            target_id=split.target_id,
+            control_release_id=split.control_release_id,
+            candidate_deployment_id=split.candidate_deployment_id,
+        )
 
     def restore_control(
         self,
@@ -87,6 +134,9 @@ class FakeTraffic:
                 candidate_base_url=candidate_base_url,
                 candidate_weight_percent=0,
                 operation_id=operation_id,
+                target_id="target-1",
+                control_release_id="release-0",
+                candidate_deployment_id="deployment-1",
             )
         )
 
@@ -151,7 +201,9 @@ def promoted_cycle() -> DevelopmentCycle:
     )
 
 
-def test_soak_regression_restores_baseline_traffic_and_serving_release() -> None:
+def test_soak_regression_restores_baseline_traffic_and_serving_release(
+    tmp_path,
+) -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     metadata.create_all(engine)
     cycles = CycleService(SqlCycleRepository(engine))
@@ -166,6 +218,7 @@ def test_soak_regression_restores_baseline_traffic_and_serving_release() -> None
     traffic = FakeTraffic()
     observer = RegressionObserver()
     runtime = FakeReleaseRuntime(catalog)
+    source = FakeSourcePromotion()
     service = PostPromotionSoakService(
         cycles,
         traffic,
@@ -173,6 +226,10 @@ def test_soak_regression_restores_baseline_traffic_and_serving_release() -> None
         catalog,
         SqlSoakDecisionRepository(engine),
         runtime,  # type: ignore[arg-type]
+        source,  # type: ignore[arg-type]
+        repository_root=tmp_path.resolve(),
+        worktree_root=(tmp_path / "worktrees").resolve(),
+        default_branch="main",
     )
     soaking = service.start("cycle-1", operation_id="soak:start")
     assert soaking.state is CycleState.SOAKING
@@ -186,6 +243,14 @@ def test_soak_regression_restores_baseline_traffic_and_serving_release() -> None
     )
     assert decision.kind is SoakDecisionKind.ROLLBACK
 
+    # Simulate a crash after the serving pointer was durably restored but before
+    # source/container/cycle effects completed. Applying the same rollback must reconcile.
+    catalog.set_serving(
+        "target-1",
+        "release-0",
+        operation_id="soak:effect:0:serving",
+    )
+
     rolled_back = service.apply(
         "cycle-1",
         decision_operation_id="soak:decision:0",
@@ -198,6 +263,9 @@ def test_soak_regression_restores_baseline_traffic_and_serving_release() -> None
     assert traffic.restored == ["soak:effect:0:traffic"]
     assert traffic.applied[0].control_base_url == "http://127.0.0.1:4100"
     assert traffic.applied[0].candidate_base_url == "http://127.0.0.1:4200"
+    assert source.restored == ["a" * 40]
+    assert source.cleaned == ["cycle-1"]
+    assert runtime.stopped_deployments == ["deployment-1"]
 
     replay = service.apply(
         "cycle-1",

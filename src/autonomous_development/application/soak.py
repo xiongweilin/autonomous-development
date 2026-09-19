@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from autonomous_development.application.cycles import CycleService
 from autonomous_development.application.release_catalog import ReleaseCatalogService
 from autonomous_development.application.release_runtime import ReleaseRuntimeService
+from autonomous_development.application.source_promotion import SourcePromotionService
 from autonomous_development.domain.canary import CanaryGuardrails
 from autonomous_development.domain.enums import (
     CycleState,
@@ -28,6 +31,11 @@ class PostPromotionSoakService:
         releases: ReleaseCatalogService,
         decisions: SoakDecisionRepository,
         runtime: ReleaseRuntimeService,
+        source_promotion: SourcePromotionService,
+        *,
+        repository_root: Path,
+        worktree_root: Path,
+        default_branch: str,
     ) -> None:
         self._cycles = cycles
         self._traffic = traffic
@@ -35,6 +43,10 @@ class PostPromotionSoakService:
         self._releases = releases
         self._decisions = decisions
         self._runtime = runtime
+        self._source_promotion = source_promotion
+        self._repository_root = repository_root
+        self._worktree_root = worktree_root
+        self._default_branch = default_branch
 
     def start(self, cycle_id: str, *, operation_id: str) -> DevelopmentCycle:
         cycle = self._cycles.get(cycle_id)
@@ -92,6 +104,9 @@ class PostPromotionSoakService:
                 candidate_base_url=candidate_runtime.base_url,
                 candidate_weight_percent=100,
                 operation_id=route_operation_id,
+                target_id=cycle.target_id,
+                control_release_id=cycle.baseline_release_id,
+                candidate_deployment_id=cycle.candidate_deployment_id,
             )
         )
         evidence = self._observer.observe(
@@ -130,6 +145,12 @@ class PostPromotionSoakService:
                 return cycle
             if cycle.state is not CycleState.SOAKING:
                 raise ValueError("complete decision requires a soaking cycle")
+            self._runtime.stop_release(cycle.baseline_release_id)
+            self._source_promotion.cleanup_cycle(
+                repository_root=self._repository_root,
+                worktree_root=self._worktree_root,
+                cycle_id=cycle.id,
+            )
             return self._cycles.transition(
                 cycle.id,
                 CycleState.COMPLETED,
@@ -143,24 +164,69 @@ class PostPromotionSoakService:
             return cycle
         if cycle.state is not CycleState.SOAKING:
             raise ValueError("rollback decision requires a soaking cycle")
+        return self._rollback_to_baseline(cycle, effect_operation_id)
+
+    def rollback_unobserved(
+        self,
+        cycle_id: str,
+        *,
+        effect_operation_id: str,
+    ) -> DevelopmentCycle:
+        cycle = self._cycles.get(cycle_id)
+        if cycle.state is CycleState.ROLLED_BACK:
+            return cycle
+        if cycle.state is not CycleState.SOAKING:
+            raise ValueError("unobserved soak rollback requires a soaking cycle")
+        return self._rollback_to_baseline(cycle, effect_operation_id)
+
+    def _rollback_to_baseline(
+        self,
+        cycle: DevelopmentCycle,
+        effect_operation_id: str,
+    ) -> DevelopmentCycle:
         if cycle.experiment_id is None:
             raise ValueError("soaking cycle has no experiment identity")
 
         control_runtime = self._runtime.resolve(cycle.baseline_release_id)
-        serving, candidate_runtime = self._runtime.resolve_serving(cycle.target_id)
-        if serving.deployment_id != cycle.candidate_deployment_id:
-            raise ValueError("serving release is not the promoted candidate deployment")
+        soak_experiment_id = f"{cycle.experiment_id}-soak"
+        route = self._traffic.read_current()
+        if route is None or route.experiment_id != soak_experiment_id:
+            raise ValueError("soak rollback requires the active soak traffic route")
+        if (
+            route.target_id is not None
+            and route.target_id != cycle.target_id
+        ):
+            raise ValueError("active soak route belongs to another target")
+        if (
+            route.candidate_deployment_id is not None
+            and route.candidate_deployment_id != cycle.candidate_deployment_id
+        ):
+            raise ValueError("active soak route belongs to another candidate deployment")
         self._traffic.restore_control(
-            experiment_id=f"{cycle.experiment_id}-soak",
+            experiment_id=soak_experiment_id,
             stage_index=0,
             control_base_url=control_runtime.base_url,
-            candidate_base_url=candidate_runtime.base_url,
+            candidate_base_url=route.candidate_base_url,
             operation_id=f"{effect_operation_id}:traffic",
         )
         self._releases.set_serving(
             cycle.target_id,
             cycle.baseline_release_id,
             operation_id=f"{effect_operation_id}:serving",
+        )
+        baseline = self._releases.get(cycle.baseline_release_id)
+        self._source_promotion.restore_baseline(
+            repository_root=self._repository_root,
+            default_branch=self._default_branch,
+            baseline_commit=baseline.source_commit,
+        )
+        if cycle.candidate_deployment_id is None:
+            raise ValueError("rollback cycle has no candidate deployment")
+        self._runtime.stop_deployment(cycle.candidate_deployment_id)
+        self._source_promotion.cleanup_cycle(
+            repository_root=self._repository_root,
+            worktree_root=self._worktree_root,
+            cycle_id=cycle.id,
         )
         return self._cycles.transition(
             cycle.id,

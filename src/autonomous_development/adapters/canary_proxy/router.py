@@ -1,13 +1,17 @@
 from __future__ import annotations
 
-import asyncio
+import hashlib
+import secrets
 import time
+from datetime import UTC, datetime
 from urllib.parse import urlsplit
 
 import httpx
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
+from autonomous_development.domain.models import RequestAttribution
+from autonomous_development.ports.persistence import RequestAttributionRepository
 from autonomous_development.ports.traffic import TrafficRouteReader, TrafficRouteSnapshot
 
 from .metrics import Arm, CanaryMetricsRegistry
@@ -26,27 +30,21 @@ _HOP_BY_HOP_HEADERS = frozenset(
         "content-length",
     }
 )
+_SESSION_COOKIE = "autodev_session"
+_SESSION_HEADER = "x-autodev-session"
 
 
 class _WeightedSelector:
-    def __init__(self) -> None:
-        self._lock = asyncio.Lock()
-        self._counters: dict[int, int] = {}
-
-    async def choose(self, route: TrafficRouteSnapshot) -> Arm:
+    def choose(self, route: TrafficRouteSnapshot, session_id: str) -> Arm:
         weight = route.candidate_weight_percent
         if weight <= 0:
             return "control"
         if weight >= 100:
             return "candidate"
-        async with self._lock:
-            counter = self._counters.get(route.generation, 0)
-            self._counters[route.generation] = counter + 1
-            if len(self._counters) > 128:
-                oldest = sorted(self._counters)[:-64]
-                for generation in oldest:
-                    self._counters.pop(generation, None)
-        slot = (counter * 37) % 100
+        digest = hashlib.sha256(
+            f"{route.experiment_id}\0{session_id}".encode()
+        ).digest()
+        slot = int.from_bytes(digest[:8], "big") % 100
         return "candidate" if slot < weight else "control"
 
 
@@ -54,6 +52,7 @@ def create_canary_proxy(
     routes: TrafficRouteReader,
     metrics: CanaryMetricsRegistry,
     *,
+    attributions: RequestAttributionRepository | None = None,
     upstream_timeout_seconds: float = 30.0,
     upstream_transport: httpx.AsyncBaseTransport | None = None,
 ) -> FastAPI:
@@ -90,7 +89,42 @@ def create_canary_proxy(
         _require_loopback(route.control_base_url)
         _require_loopback(route.candidate_base_url)
 
-        arm = await selector.choose(route)
+        session_id = _session_id(request)
+        arm = selector.choose(route, session_id)
+        request_ref = secrets.token_urlsafe(18)
+
+        if attributions is not None:
+            if (
+                route.target_id is None
+                or route.control_release_id is None
+                or route.candidate_deployment_id is None
+            ):
+                return JSONResponse(
+                    status_code=503,
+                    content={"detail": "active traffic route lacks attribution identity"},
+                )
+            try:
+                attributions.add(
+                    RequestAttribution(
+                        request_ref=request_ref,
+                        target_id=route.target_id,
+                        observed_at=datetime.now(UTC),
+                        arm=arm,
+                        experiment_id=route.experiment_id,
+                        release_id=(
+                            route.control_release_id if arm == "control" else None
+                        ),
+                        deployment_id=(
+                            route.candidate_deployment_id if arm == "candidate" else None
+                        ),
+                    )
+                )
+            except Exception:
+                return JSONResponse(
+                    status_code=503,
+                    content={"detail": "request attribution could not be persisted"},
+                )
+
         base_url = route.candidate_base_url if arm == "candidate" else route.control_base_url
         target = base_url.rstrip("/") + request.url.path
         if request.url.query:
@@ -100,7 +134,15 @@ def create_canary_proxy(
             key: value
             for key, value in request.headers.items()
             if key.lower() not in _HOP_BY_HOP_HEADERS
+            and key.lower() != _SESSION_HEADER
         }
+        cookie = headers.get("cookie")
+        if cookie is not None:
+            forwarded_cookie = _without_proxy_session_cookie(cookie)
+            if forwarded_cookie:
+                headers["cookie"] = forwarded_cookie
+            else:
+                headers.pop("cookie", None)
         body = await request.body()
         started = time.monotonic()
         status_code = 502
@@ -123,21 +165,15 @@ def create_canary_proxy(
                 for key, value in upstream.headers.items()
                 if key.lower() not in _HOP_BY_HOP_HEADERS
             }
-            response_headers["x-autodev-arm"] = arm
-            response_headers["x-autodev-experiment"] = route.experiment_id
-            return Response(
+            response = Response(
                 content=upstream.content,
                 status_code=upstream.status_code,
                 headers=response_headers,
             )
         except httpx.HTTPError:
-            return JSONResponse(
+            response = JSONResponse(
                 status_code=502,
                 content={"detail": "selected upstream unavailable"},
-                headers={
-                    "x-autodev-arm": arm,
-                    "x-autodev-experiment": route.experiment_id,
-                },
             )
         finally:
             latency_ms = (time.monotonic() - started) * 1000
@@ -148,7 +184,37 @@ def create_canary_proxy(
                 latency_ms=latency_ms,
             )
 
+        response.headers["x-autodev-arm"] = arm
+        response.headers["x-autodev-experiment"] = route.experiment_id
+        response.headers["x-autodev-request-ref"] = request_ref
+        response.headers[_SESSION_HEADER] = session_id
+        response.set_cookie(
+            _SESSION_COOKIE,
+            session_id,
+            httponly=True,
+            samesite="strict",
+        )
+        return response
+
     return app
+
+
+def _without_proxy_session_cookie(value: str) -> str:
+    parts = tuple(part.strip() for part in value.split(";") if part.strip())
+    return "; ".join(
+        part
+        for part in parts
+        if part.split("=", 1)[0].strip() != _SESSION_COOKIE
+    )
+
+
+def _session_id(request: Request) -> str:
+    supplied = request.headers.get(_SESSION_HEADER) or request.cookies.get(_SESSION_COOKIE)
+    if supplied is not None:
+        normalized = supplied.strip()
+        if normalized and len(normalized) <= 128:
+            return normalized
+    return secrets.token_urlsafe(18)
 
 
 def _require_loopback(base_url: str) -> None:

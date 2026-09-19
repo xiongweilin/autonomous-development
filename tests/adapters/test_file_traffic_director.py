@@ -20,6 +20,9 @@ def split(
         candidate_base_url="http://127.0.0.1:4200",
         candidate_weight_percent=weight,
         operation_id=operation_id,
+        target_id="target-1",
+        control_release_id="release-1",
+        candidate_deployment_id="deployment-2",
     )
 
 
@@ -61,6 +64,9 @@ def test_new_operation_advances_generation_and_restore_is_explicit(tmp_path: Pat
     current = traffic.read_current()
     assert current is not None
     assert current.candidate_weight_percent == 0
+    assert current.target_id == "target-1"
+    assert current.control_release_id == "release-1"
+    assert current.candidate_deployment_id == "deployment-2"
 
 
 def test_non_loopback_routes_are_rejected(tmp_path: Path) -> None:

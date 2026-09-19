@@ -28,6 +28,8 @@ class FakeReleaseRuntime:
     def __init__(self, catalog: ReleaseCatalogService) -> None:
         self.catalog = catalog
         self.calls: list[str] = []
+        self.stopped_releases: list[str] = []
+        self.stopped_deployments: list[str] = []
 
     def resolve(self, release_id: str):
         from autonomous_development.ports.deployment import DeploymentRuntime
@@ -47,6 +49,24 @@ class FakeReleaseRuntime:
         if release is None:
             raise ValueError("missing serving release")
         return release, self.resolve(release.id)
+
+    def stop_release(self, release_id: str) -> None:
+        self.stopped_releases.append(release_id)
+
+    def stop_deployment(self, deployment_id: str) -> None:
+        self.stopped_deployments.append(deployment_id)
+
+
+class FakeSourcePromotion:
+    def __init__(self) -> None:
+        self.cleaned: list[str] = []
+        self.restored: list[str] = []
+
+    def cleanup_cycle(self, **kwargs: object) -> None:
+        self.cleaned.append(str(kwargs["cycle_id"]))
+
+    def restore_baseline(self, **kwargs: object) -> None:
+        self.restored.append(str(kwargs["baseline_commit"]))
 
 
 class IdempotentTraffic:
@@ -174,6 +194,7 @@ def test_dbos_soak_holds_then_completes_and_replay_is_stable(tmp_path: Path) -> 
     traffic = IdempotentTraffic()
     observer = AccumulatingObserver()
     runtime = FakeReleaseRuntime(catalog)
+    source = FakeSourcePromotion()
     service = PostPromotionSoakService(
         cycles,
         traffic,
@@ -181,6 +202,10 @@ def test_dbos_soak_holds_then_completes_and_replay_is_stable(tmp_path: Path) -> 
         catalog,
         SqlSoakDecisionRepository(engine),
         runtime,  # type: ignore[arg-type]
+        source,  # type: ignore[arg-type]
+        repository_root=tmp_path.resolve(),
+        worktree_root=(tmp_path / "worktrees").resolve(),
+        default_branch="main",
     )
 
     config: DBOSConfig = {
@@ -213,6 +238,8 @@ def test_dbos_soak_holds_then_completes_and_replay_is_stable(tmp_path: Path) -> 
         serving = catalog.serving("target-1")
         assert serving is not None
         assert serving.id == "release-1"
+        assert runtime.stopped_releases == ["release-0"]
+        assert source.cleaned == ["cycle-1"]
     finally:
         DBOS.destroy(workflow_completion_timeout_sec=5)
         engine.dispose()

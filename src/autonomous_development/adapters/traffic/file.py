@@ -62,6 +62,9 @@ class AtomicFileTrafficDirector(TrafficDirector):
                     "candidate_weight_percent": split.candidate_weight_percent,
                     "operation_id": split.operation_id,
                     "generation": generation,
+                    "target_id": split.target_id,
+                    "control_release_id": split.control_release_id,
+                    "candidate_deployment_id": split.candidate_deployment_id,
                 },
             )
             state = TrafficRouteState(
@@ -70,6 +73,9 @@ class AtomicFileTrafficDirector(TrafficDirector):
                 candidate_weight_percent=split.candidate_weight_percent,
                 generation=generation,
                 evidence_ref=evidence_ref,
+                target_id=split.target_id,
+                control_release_id=split.control_release_id,
+                candidate_deployment_id=split.candidate_deployment_id,
             )
             document = {
                 **asdict(split),
@@ -89,6 +95,7 @@ class AtomicFileTrafficDirector(TrafficDirector):
         candidate_base_url: str,
         operation_id: str,
     ) -> TrafficRouteState:
+        current = self.read_current()
         return self.apply(
             TrafficSplit(
                 experiment_id=experiment_id,
@@ -97,6 +104,13 @@ class AtomicFileTrafficDirector(TrafficDirector):
                 candidate_base_url=candidate_base_url,
                 candidate_weight_percent=0,
                 operation_id=operation_id,
+                target_id=current.target_id if current is not None else None,
+                control_release_id=(
+                    current.control_release_id if current is not None else None
+                ),
+                candidate_deployment_id=(
+                    current.candidate_deployment_id if current is not None else None
+                ),
             )
         )
 
@@ -189,9 +203,18 @@ def _state_from_document(document: dict[str, Any]) -> TrafficRouteState:
             candidate_weight_percent=int(document["candidate_weight_percent"]),
             generation=int(document["generation"]),
             evidence_ref=str(document["evidence_ref"]),
+            target_id=_optional_string(document.get("target_id")),
+            control_release_id=_optional_string(document.get("control_release_id")),
+            candidate_deployment_id=_optional_string(
+                document.get("candidate_deployment_id")
+            ),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise RuntimeError("traffic route state is malformed") from exc
+
+
+def _optional_string(value: object) -> str | None:
+    return None if value is None else str(value)
 
 
 def _safe_evidence_name(operation_id: str) -> str:
@@ -216,6 +239,11 @@ def _snapshot_from_document(document: dict[str, Any]) -> TrafficRouteSnapshot:
             operation_id=str(document["operation_id"]),
             generation=int(document["generation"]),
             evidence_ref=str(document["evidence_ref"]),
+            target_id=_optional_string(document.get("target_id")),
+            control_release_id=_optional_string(document.get("control_release_id")),
+            candidate_deployment_id=_optional_string(
+                document.get("candidate_deployment_id")
+            ),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise RuntimeError("traffic route snapshot is malformed") from exc

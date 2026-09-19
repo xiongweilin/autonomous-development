@@ -317,11 +317,17 @@ def _terminate(process: subprocess.Popen[str]) -> None:
 
 
 def _sandbox_policy(sandbox: CodexSandbox, cwd: Path) -> dict[str, object]:
+    restricted_read = {
+        "type": "restricted",
+        "includePlatformDefaults": True,
+        "readableRoots": [str(cwd)],
+    }
     if sandbox is CodexSandbox.READ_ONLY:
-        return {"type": "readOnly", "access": {"type": "fullAccess"}}
+        return {"type": "readOnly", "access": restricted_read}
     return {
         "type": "workspaceWrite",
         "writableRoots": [str(cwd)],
+        "readOnlyAccess": restricted_read,
         "networkAccess": False,
     }
 

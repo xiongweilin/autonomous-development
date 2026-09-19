@@ -26,6 +26,7 @@ V1 deliberately does **not** implement a coding agent. Codex is the engineering 
 
 - Canonical V1 architecture, semantics, lifecycle and acceptance criteria: [docs/v1-design.md](docs/v1-design.md)
 - Local runtime dependencies and deployment prerequisites: [docs/v1-runtime-dependencies.md](docs/v1-runtime-dependencies.md)
+- Local bootstrap and operation procedure: [docs/v1-local-deployment.md](docs/v1-local-deployment.md)
 - External research basis and adopted/rejected ideas: [docs/v1-research-basis.md](docs/v1-research-basis.md)
 
 ## V1 boundary
@@ -40,4 +41,7 @@ Those projects may inspire design decisions, and future adapters may integrate w
 
 V1 targets one registered software/Agent product at a time on one local Windows workstation with Docker Desktop. The product goal is human-owned; implementation and iterative improvement inside that goal may run autonomously.
 
-No implementation or local deployment is part of the design-freeze commit.
+The V1 implementation is local-only. Bootstrap, readiness, autonomous iteration, canary routing,
+feedback attribution, promotion/rollback, soak, and terminal cleanup are implemented behind the
+single-target runtime boundary. Production acceptance still depends on the repository CI/security
+gates and the local readiness/bootstrap checks documented above.

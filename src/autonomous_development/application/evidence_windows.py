@@ -8,7 +8,7 @@ from autonomous_development.ports.persistence import (
     EvidenceWindowRepository,
     FeedbackRepository,
 )
-from autonomous_development.ports.telemetry import TelemetryProvider
+from autonomous_development.ports.telemetry import TelemetryEvidence, TelemetryProvider
 
 
 class EvidenceWindowService:
@@ -56,16 +56,12 @@ class EvidenceWindowService:
         serving = self._releases.serving(target_id)
         if serving is None:
             raise ValueError(f"target {target_id} has no serving release")
-        if opened_at < serving.promoted_at:
-            raise ValueError(
-                "evidence window predates the current serving release and may mix releases"
-            )
-
         feedback = (
             self._explicit_feedback(
                 feedback_ids,
                 target_id=target_id,
                 release_id=serving.id,
+                deployment_id=serving.deployment_id,
                 opened_at=opened_at,
                 closed_at=closed_at,
             )
@@ -73,15 +69,24 @@ class EvidenceWindowService:
             else self._feedback.list_attributable(
                 target_id,
                 serving.id,
+                deployment_id=serving.deployment_id,
                 opened_at=opened_at,
                 closed_at=closed_at,
             )
         )
-        telemetry = self._telemetry.collect(
-            target_id=target_id,
-            release_id=serving.id,
-            opened_at=opened_at,
-            closed_at=closed_at,
+        telemetry_opened_at = max(opened_at, serving.promoted_at)
+        telemetry = (
+            TelemetryEvidence(
+                evidence_refs=(),
+                missing_metrics=("serving-release-not-yet-promoted",),
+            )
+            if closed_at < telemetry_opened_at
+            else self._telemetry.collect(
+                target_id=target_id,
+                release_id=serving.id,
+                opened_at=telemetry_opened_at,
+                closed_at=closed_at,
+            )
         )
         window = EvidenceWindow(
             id=window_id,
@@ -106,6 +111,7 @@ class EvidenceWindowService:
         *,
         target_id: str,
         release_id: str,
+        deployment_id: str,
         opened_at: datetime,
         closed_at: datetime,
     ) -> tuple[UserFeedback, ...]:
@@ -114,7 +120,10 @@ class EvidenceWindowService:
             item = self._feedback.get(feedback_id)
             if item is None:
                 raise ValueError(f"feedback does not exist: {feedback_id}")
-            if item.target_id != target_id or item.release_id != release_id:
+            if item.target_id != target_id or (
+                item.release_id != release_id
+                and item.deployment_id != deployment_id
+            ):
                 raise ValueError("feedback is not attributable to the serving release")
             if not opened_at <= item.received_at <= closed_at:
                 raise ValueError("feedback is outside the requested evidence window")

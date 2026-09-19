@@ -33,6 +33,9 @@ from autonomous_development.adapters.postgres.release_decisions import (
     SqlReleaseDecisionRepository,
 )
 from autonomous_development.adapters.postgres.releases import SqlReleasedVersionRepository
+from autonomous_development.adapters.postgres.request_attributions import (
+    SqlRequestAttributionRepository,
+)
 from autonomous_development.adapters.postgres.soak_decisions import (
     SqlSoakDecisionRepository,
 )
@@ -143,6 +146,7 @@ def compose_runtime(settings: RuntimeSettings) -> RuntimeComposition:
         pool_pre_ping=True,
     )
     evidence_store = LocalEvidenceStore(settings.evidence_root)
+    traffic = AtomicFileTrafficDirector(settings.traffic_state_root, evidence_store)
     runner = SubprocessRunner()
     repository = GitCliRepository()
     contract_loader = TomlTargetContractLoader()
@@ -150,13 +154,19 @@ def compose_runtime(settings: RuntimeSettings) -> RuntimeComposition:
     cycle_repository = SqlCycleRepository(engine)
     release_repository = SqlReleasedVersionRepository(engine)
     feedback_repository = SqlFeedbackRepository(engine)
+    attribution_repository = SqlRequestAttributionRepository(engine)
     target_repository = SqlTargetRepository(engine)
     objective_repository = SqlObjectiveRepository(engine)
 
     cycles = CycleService(cycle_repository)
     releases = ReleaseCatalogService(release_repository)
     targets = TargetRegistryService(target_repository, objective_repository)
-    feedback = FeedbackService(releases, feedback_repository)
+    feedback = FeedbackService(
+        releases,
+        feedback_repository,
+        attribution_repository,
+        traffic,
+    )
 
     registered = targets.list_targets()
     if len(registered) != 1:
@@ -180,6 +190,9 @@ def compose_runtime(settings: RuntimeSettings) -> RuntimeComposition:
     if contract.target_id != target.id:
         engine.dispose()
         raise RuntimeConfigurationError("target contract identity differs from registry")
+    if contract.revision != target.target_contract_revision:
+        engine.dispose()
+        raise RuntimeConfigurationError("target contract revision differs from registry")
 
     codex = CodexAppServer(
         thread_journal_root=settings.codex_thread_journal_root,
@@ -245,7 +258,6 @@ def compose_runtime(settings: RuntimeSettings) -> RuntimeComposition:
         contract,
     )
     experiments = ExperimentService(SqlExperimentRepository(engine))
-    traffic = AtomicFileTrafficDirector(settings.traffic_state_root, evidence_store)
     canary_observer = ProxyCanaryObserver(
         settings.canary_proxy_base_url,
         evidence_store,
@@ -300,6 +312,10 @@ def compose_runtime(settings: RuntimeSettings) -> RuntimeComposition:
         releases,
         SqlSoakDecisionRepository(engine),
         release_runtime,
+        source_promotion,
+        repository_root=repository_root,
+        worktree_root=settings.worktree_root,
+        default_branch=target.default_branch,
     )
     guardrails = CanaryGuardrails(
         max_candidate_error_rate=contract.canary.max_candidate_error_rate,
@@ -329,9 +345,14 @@ def compose_runtime(settings: RuntimeSettings) -> RuntimeComposition:
         releases=releases,
         contracts=contract_loader,
         runner=runner,
+        traffic=traffic,
     )
     metrics = CanaryMetricsRegistry()
-    proxy_app = create_canary_proxy(traffic, metrics)
+    proxy_app = create_canary_proxy(
+        traffic,
+        metrics,
+        attributions=attribution_repository,
+    )
     app = create_control_app(
         feedback,
         readiness,

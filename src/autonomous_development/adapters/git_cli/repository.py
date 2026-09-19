@@ -336,6 +336,46 @@ class GitCliRepository(RepositoryProvider):
             codex_thread_id=thread_id or None,
         )
 
+    def restore_baseline(
+        self,
+        repository_root: Path,
+        default_branch: str,
+        *,
+        baseline_commit: str,
+    ) -> RepositoryBaseline:
+        root = repository_root.resolve()
+        current = self.verify_baseline(root, default_branch)
+        if current.commit == baseline_commit:
+            return current
+
+        merge_base = self._run(root, "merge-base", baseline_commit, current.commit)
+        if merge_base != baseline_commit:
+            raise GitRepositoryError(
+                "current default branch is not descended from rollback baseline"
+            )
+        count = self._run(root, "rev-list", "--count", f"{baseline_commit}..{current.commit}")
+        if count != "1":
+            raise GitRepositoryError(
+                "source rollback refuses to discard more than one autonomous commit"
+            )
+        subject = self._run(root, "log", "-1", "--format=%s")
+        thread_id = self._run(
+            root,
+            "log",
+            "-1",
+            "--format=%(trailers:key=Autodev-Codex-Thread,valueonly)",
+        )
+        if not subject.startswith("autodev: implement ") or not thread_id:
+            raise GitRepositoryError(
+                "source rollback refuses a default branch head without autonomous provenance"
+            )
+
+        self._run(root, "reset", "--hard", baseline_commit)
+        restored = self.verify_baseline(root, default_branch)
+        if restored.commit != baseline_commit:
+            raise GitRepositoryError("default branch did not reconcile to rollback baseline")
+        return restored
+
     def remove_worktree(
         self,
         baseline: RepositoryBaseline,
@@ -348,6 +388,36 @@ class GitCliRepository(RepositoryProvider):
             "--force",
             str(worktree.path),
         )
+
+    def cleanup_cycle(
+        self,
+        repository_root: Path,
+        *,
+        cycle_id: str,
+        worktree_root: Path,
+    ) -> None:
+        safe_id = _safe_cycle_id(cycle_id)
+        root = repository_root.resolve()
+        worktree_parent = worktree_root.resolve()
+        path = (worktree_parent / safe_id).resolve()
+        if worktree_parent not in path.parents:
+            raise GitRepositoryError("resolved cleanup worktree escaped its configured root")
+        branch = f"autodev/{safe_id}"
+
+        if path.exists():
+            self._run(root, "worktree", "remove", "--force", str(path))
+        self._run(root, "worktree", "prune")
+        if (
+            self._returncode(
+                root,
+                "show-ref",
+                "--verify",
+                "--quiet",
+                f"refs/heads/{branch}",
+            )
+            == 0
+        ):
+            self._run(root, "branch", "-D", branch)
 
     def _validate_existing_worktree(
         self,

@@ -163,6 +163,7 @@ class ChangeProposal:
     max_implementation_attempts: int
     mandatory_gates: tuple[str, ...]
     change_intent: str | None = None
+    max_changed_files: int = 50
 
     def __post_init__(self) -> None:
         for field_name, value in (
@@ -177,6 +178,8 @@ class ChangeProposal:
             raise ValueError("proposal requires acceptance criteria, scope and mandatory gates")
         if self.max_implementation_attempts < 1:
             raise ValueError("implementation attempt budget must be positive")
+        if self.max_changed_files < 1:
+            raise ValueError("changed-file budget must be positive")
         if self.diagnosis_id is not None and (
             self.change_intent is None or not self.change_intent.strip()
         ):
@@ -383,6 +386,28 @@ class UserFeedback:
     @property
     def attributable(self) -> bool:
         return self.release_id is not None or self.deployment_id is not None
+
+
+@dataclass(frozen=True, slots=True)
+class RequestAttribution:
+    request_ref: str
+    target_id: str
+    observed_at: datetime
+    arm: str
+    experiment_id: str
+    release_id: str | None = None
+    deployment_id: str | None = None
+
+    def __post_init__(self) -> None:
+        _required(self.request_ref, "request reference")
+        _required(self.target_id, "target id")
+        _required(self.experiment_id, "experiment id")
+        if self.arm not in {"control", "candidate"}:
+            raise ValueError("request attribution arm must be control or candidate")
+        if self.arm == "control" and self.release_id is None:
+            raise ValueError("control request attribution requires a release")
+        if self.arm == "candidate" and self.deployment_id is None:
+            raise ValueError("candidate request attribution requires a deployment")
 
 
 @dataclass(frozen=True, slots=True)

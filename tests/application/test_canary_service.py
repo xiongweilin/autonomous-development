@@ -14,7 +14,11 @@ from autonomous_development.ports.persistence import (
     ExperimentStageReceipt,
     OperationConflictError,
 )
-from autonomous_development.ports.traffic import TrafficRouteState, TrafficSplit
+from autonomous_development.ports.traffic import (
+    TrafficRouteSnapshot,
+    TrafficRouteState,
+    TrafficSplit,
+)
 
 
 class MemoryExperimentRepository:
@@ -69,16 +73,34 @@ class FakeTraffic:
     def __init__(self) -> None:
         self.applied: list[TrafficSplit] = []
         self.restored: list[dict[str, object]] = []
+        self.current: TrafficRouteSnapshot | None = None
 
     def apply(self, split: TrafficSplit) -> TrafficRouteState:
         self.applied.append(split)
-        return TrafficRouteState(
+        state = TrafficRouteState(
             experiment_id=split.experiment_id,
             stage_index=split.stage_index,
             candidate_weight_percent=split.candidate_weight_percent,
-            generation=1,
-            evidence_ref="traffic:1",
+            generation=len(self.applied),
+            evidence_ref=f"traffic:{len(self.applied)}",
         )
+        self.current = TrafficRouteSnapshot(
+            experiment_id=split.experiment_id,
+            stage_index=split.stage_index,
+            control_base_url=split.control_base_url,
+            candidate_base_url=split.candidate_base_url,
+            candidate_weight_percent=split.candidate_weight_percent,
+            operation_id=split.operation_id,
+            generation=state.generation,
+            evidence_ref=state.evidence_ref,
+            target_id=split.target_id,
+            control_release_id=split.control_release_id,
+            candidate_deployment_id=split.candidate_deployment_id,
+        )
+        return state
+
+    def read_current(self) -> TrafficRouteSnapshot | None:
+        return self.current
 
     def restore_control(
         self,
@@ -96,13 +118,28 @@ class FakeTraffic:
                 "operation_id": operation_id,
             }
         )
-        return TrafficRouteState(
+        state = TrafficRouteState(
             experiment_id=experiment_id,
             stage_index=stage_index,
             candidate_weight_percent=0,
             generation=2,
             evidence_ref="traffic:restore",
         )
+        assert self.current is not None
+        self.current = TrafficRouteSnapshot(
+            experiment_id=experiment_id,
+            stage_index=stage_index,
+            control_base_url=control_base_url,
+            candidate_base_url=candidate_base_url,
+            candidate_weight_percent=0,
+            operation_id=operation_id,
+            generation=state.generation,
+            evidence_ref=state.evidence_ref,
+            target_id=self.current.target_id,
+            control_release_id=self.current.control_release_id,
+            candidate_deployment_id=self.current.candidate_deployment_id,
+        )
+        return state
 
 
 class FakeObserver:
@@ -186,6 +223,25 @@ def test_advance_is_persisted_before_return() -> None:
     assert result.decision.kind is CanaryDecisionKind.ADVANCE
     assert result.experiment.current_stage_index == 1
     assert not traffic.restored
+
+
+def test_failure_reconciliation_restores_routed_candidate_before_cleanup() -> None:
+    traffic = FakeTraffic()
+    observer = FakeObserver(stage_evidence())
+    canary = service(traffic, observer)
+    result = run(canary, "run-advance")
+    assert result.decision.kind is CanaryDecisionKind.ADVANCE
+    assert traffic.current is not None
+    assert traffic.current.candidate_weight_percent == 10
+
+    canary.restore_candidate_control(
+        "experiment-1",
+        operation_id="run-advance:failure-restore",
+    )
+
+    assert traffic.current is not None
+    assert traffic.current.candidate_weight_percent == 0
+    assert traffic.restored[-1]["operation_id"] == "run-advance:failure-restore"
 
 
 def test_regression_persists_decision_and_restores_control() -> None:

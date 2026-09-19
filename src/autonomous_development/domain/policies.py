@@ -12,6 +12,15 @@ class ScopeViolation(ValueError):
 def validate_changed_paths(proposal: ChangeProposal, changed_paths: tuple[str, ...]) -> None:
     if not changed_paths:
         raise ScopeViolation("candidate must contain at least one changed path")
+    if len(changed_paths) > proposal.max_changed_files:
+        raise ScopeViolation(
+            f"candidate changes {len(changed_paths)} files, exceeding budget "
+            f"{proposal.max_changed_files}"
+        )
+    if "autonomous-development.toml" in {
+        item.replace("\\", "/").strip("/") for item in changed_paths
+    }:
+        raise ScopeViolation("target contract is system-owned and cannot be changed autonomously")
     allowed = tuple(_normalize_prefix(path) for path in proposal.allowed_paths)
     forbidden = tuple(_normalize_prefix(path) for path in proposal.forbidden_paths)
     for raw_path in changed_paths:

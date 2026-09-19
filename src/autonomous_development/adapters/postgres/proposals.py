@@ -36,6 +36,7 @@ class SqlChangeProposalRepository(ChangeProposalRepository):
                         allowed_paths_json=list(proposal.allowed_paths),
                         forbidden_paths_json=list(proposal.forbidden_paths),
                         max_implementation_attempts=proposal.max_implementation_attempts,
+                        max_changed_files=proposal.max_changed_files,
                         mandatory_gates_json=list(proposal.mandatory_gates),
                         change_intent=proposal.change_intent,
                     )
@@ -77,6 +78,7 @@ def _proposal_from_row(row: RowMapping) -> ChangeProposal:
         max_implementation_attempts=int(values["max_implementation_attempts"]),
         mandatory_gates=_strings(values["mandatory_gates_json"], "mandatory_gates"),
         change_intent=_optional_str(values.get("change_intent")),
+        max_changed_files=int(values["max_changed_files"]),
     )
 
 

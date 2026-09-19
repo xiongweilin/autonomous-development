@@ -51,6 +51,7 @@ _ALLOWED: dict[CycleState, frozenset[CycleState]] = {
         {
             CycleState.CANDIDATE_READY,
             CycleState.FAILED_RECOVERABLE,
+            CycleState.FAILED_TERMINAL,
             CycleState.BLOCKED,
             CycleState.CANCELLED,
         }
@@ -64,30 +65,52 @@ _ALLOWED: dict[CycleState, frozenset[CycleState]] = {
         }
     ),
     CycleState.CANDIDATE_READY: frozenset(
-        {CycleState.VERIFYING, CycleState.REJECTED, CycleState.CANCELLED}
+        {
+            CycleState.VERIFYING,
+            CycleState.REJECTED,
+            CycleState.FAILED_TERMINAL,
+            CycleState.CANCELLED,
+        }
     ),
     CycleState.VERIFYING: frozenset(
         {
             CycleState.VERIFIED,
             CycleState.REJECTED,
             CycleState.FAILED_RECOVERABLE,
+            CycleState.FAILED_TERMINAL,
             CycleState.CANCELLED,
         }
     ),
     CycleState.VERIFIED: frozenset(
-        {CycleState.BUILT, CycleState.REJECTED, CycleState.CANCELLED}
+        {
+            CycleState.BUILT,
+            CycleState.REJECTED,
+            CycleState.FAILED_TERMINAL,
+            CycleState.CANCELLED,
+        }
     ),
     CycleState.BUILT: frozenset(
-        {CycleState.STAGED, CycleState.REJECTED, CycleState.CANCELLED}
+        {
+            CycleState.STAGED,
+            CycleState.REJECTED,
+            CycleState.FAILED_TERMINAL,
+            CycleState.CANCELLED,
+        }
     ),
     CycleState.STAGED: frozenset(
-        {CycleState.CANARYING, CycleState.REJECTED, CycleState.CANCELLED}
+        {
+            CycleState.CANARYING,
+            CycleState.REJECTED,
+            CycleState.FAILED_TERMINAL,
+            CycleState.CANCELLED,
+        }
     ),
     CycleState.CANARYING: frozenset(
         {
             CycleState.PROMOTION_READY,
             CycleState.REJECTED,
             CycleState.ROLLED_BACK,
+            CycleState.FAILED_TERMINAL,
             CycleState.CANCELLED,
         }
     ),
@@ -96,6 +119,7 @@ _ALLOWED: dict[CycleState, frozenset[CycleState]] = {
             CycleState.PROMOTED,
             CycleState.REJECTED,
             CycleState.ROLLED_BACK,
+            CycleState.FAILED_TERMINAL,
             CycleState.CANCELLED,
         }
     ),

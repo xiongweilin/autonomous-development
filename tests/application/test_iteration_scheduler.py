@@ -58,6 +58,8 @@ from autonomous_development.ports.target_contract import (
 )
 from autonomous_development.ports.telemetry import TelemetryEvidence
 
+CONTRACT_REVISION = "sha256:" + "d" * 64
+
 
 class FakeCodex:
     def __init__(self, confidence: float) -> None:
@@ -139,6 +141,7 @@ class FakeContractLoader:
                 max_candidate_p95_latency_ms=250.0,
                 max_p95_latency_ratio=1.25,
             ),
+            revision=CONTRACT_REVISION,
         )
 
 
@@ -186,7 +189,7 @@ def target(root: Path) -> DevelopmentTarget:
         id="target-1",
         repository=str(root),
         default_branch="main",
-        target_contract_revision="contract-1",
+        target_contract_revision=CONTRACT_REVISION,
         active_objective_revision_id="objective-1",
         mutation_policy=policy(),
     )
@@ -355,6 +358,40 @@ def test_trigger_receipt_crash_replays_same_prepared_iteration(tmp_path: Path) -
     assert replay.status == "prepared"
     assert replay.cycle_id == first_cycle_id
     assert inner.get("feedback-1") is not None
+    assert codex.calls == 1
+
+
+def test_pre_promotion_candidate_feedback_can_prepare_next_iteration(
+    tmp_path: Path,
+) -> None:
+    scheduler, codex, cycles, feedback_repository, triggers = service(
+        tmp_path,
+        confidence=0.9,
+    )
+    now = datetime.now(UTC)
+    candidate = UserFeedback(
+        id="feedback-candidate",
+        target_id="target-1",
+        received_at=now - timedelta(minutes=70),
+        kind=FeedbackKind.EXPLICIT,
+        category="incorrect-result",
+        severity=4,
+        provenance="feedback-api",
+        release_id=None,
+        deployment_id="deployment-1",
+        experiment_id="experiment-1",
+        request_ref="request-candidate",
+        free_text="Candidate returned a wrong answer during canary.",
+    )
+    feedback_repository.add(candidate)
+
+    result = scheduler.prepare_next("target-1", scheduled_time=now)
+
+    assert result.status == "prepared"
+    assert result.feedback_id == "feedback-candidate"
+    assert result.cycle_id is not None
+    assert cycles.get(result.cycle_id).state is CycleState.CHANGE_PROPOSED
+    assert triggers.get("feedback-candidate") is not None
     assert codex.calls == 1
 
 

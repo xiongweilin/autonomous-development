@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import Engine, insert, select
+from sqlalchemy import Engine, insert, or_, select
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import IntegrityError
 
@@ -51,6 +51,7 @@ class SqlFeedbackRepository(FeedbackRepository):
         target_id: str,
         release_id: str,
         *,
+        deployment_id: str,
         opened_at: datetime,
         closed_at: datetime,
     ) -> tuple[UserFeedback, ...]:
@@ -60,7 +61,10 @@ class SqlFeedbackRepository(FeedbackRepository):
                     select(user_feedback)
                     .where(
                         user_feedback.c.target_id == target_id,
-                        user_feedback.c.release_id == release_id,
+                        or_(
+                            user_feedback.c.release_id == release_id,
+                            user_feedback.c.deployment_id == deployment_id,
+                        ),
                         user_feedback.c.received_at >= opened_at,
                         user_feedback.c.received_at <= closed_at,
                     )

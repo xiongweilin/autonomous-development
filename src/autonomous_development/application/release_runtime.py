@@ -33,6 +33,13 @@ class ReleaseRuntimeService:
             raise ValueError(f"target {target_id} has no serving release")
         return release, self._ensure(release)
 
+    def stop_release(self, release_id: str) -> None:
+        release = self._releases.get(release_id)
+        self._deployment.stop(release.deployment_id)
+
+    def stop_deployment(self, deployment_id: str) -> None:
+        self._deployment.stop(deployment_id)
+
     def _ensure(self, release: ReleasedVersion) -> DeploymentRuntime:
         if release.target_id != self._contract.target_id:
             raise ValueError("release target does not match configured target contract")

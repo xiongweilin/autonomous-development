@@ -14,6 +14,7 @@ from autonomous_development.adapters.postgres.target_registry import (
     SqlObjectiveRepository,
     SqlTargetRepository,
 )
+from autonomous_development.adapters.target_contract.toml import TomlTargetContractLoader
 from autonomous_development.application.release_catalog import ReleaseCatalogService
 from autonomous_development.application.target_registry import TargetRegistryService
 from autonomous_development.domain.models import (
@@ -123,6 +124,8 @@ def seed_database(database_url: str, repository_root: Path) -> None:
         SqlTargetRepository(engine),
         SqlObjectiveRepository(engine),
     )
+    contract_revision = TomlTargetContractLoader().load(str(repository_root)).revision
+    assert contract_revision is not None
     objective = ProductObjectiveRevision(
         id="objective-1",
         target_id="target-1",
@@ -140,7 +143,7 @@ def seed_database(database_url: str, repository_root: Path) -> None:
             id="target-1",
             repository=str(repository_root),
             default_branch="main",
-            target_contract_revision="contract-1",
+            target_contract_revision=contract_revision,
             active_objective_revision_id=objective.id,
             mutation_policy=policy(),
         ),
