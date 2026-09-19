@@ -35,6 +35,8 @@ from autonomous_development.ports.target_contract import (
 from autonomous_development.runtime.config import RuntimeSettings
 from autonomous_development.runtime.readiness import RuntimeReadinessService
 
+CONTRACT_REVISION = "sha256:" + "d" * 64
+
 
 class Runner:
     def run(self, request: CommandRequest) -> CommandResult:
@@ -80,6 +82,7 @@ class Contracts:
                 max_candidate_p95_latency_ms=250.0,
                 max_p95_latency_ratio=1.25,
             ),
+            revision=CONTRACT_REVISION,
         )
 
 
@@ -108,7 +111,7 @@ def runtime_state(tmp_path: Path) -> tuple[
         id="target-1",
         repository=str(tmp_path.resolve()),
         default_branch="main",
-        target_contract_revision="contract-1",
+        target_contract_revision=CONTRACT_REVISION,
         active_objective_revision_id="objective-1",
         mutation_policy=policy,
     )
