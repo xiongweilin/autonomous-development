@@ -1,6 +1,23 @@
 # autonomous-development
 
+[![CI](https://github.com/xiongweilin/autonomous-development/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/xiongweilin/autonomous-development/actions/workflows/ci.yml)
+[![Security](https://github.com/xiongweilin/autonomous-development/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/xiongweilin/autonomous-development/actions/workflows/security.yml)
+[![Python](https://img.shields.io/badge/python-3.12--3.14-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![License](https://img.shields.io/github/license/xiongweilin/autonomous-development)](LICENSE)
+
 Local-first autonomous software development and product-evolution control plane.
+
+> A durable, evidence-driven lifecycle boundary for requirement intake, verification,
+> progressive delivery, feedback attribution, promotion and rollback.
+
+## Current V1 snapshot
+
+The V1 operator and dedicated Feishu integration are merged on `main`. The disposable
+acceptance target uses a pinned Python 3.14 Alpine image, an upstream-fixed zlib package and
+an unchanged `grype --fail-on high` security gate. See
+[the acceptance target record](acceptance/target/README.md) and the
+[local deployment runbook](docs/v1-local-deployment.md) for the current definition and
+verification boundary.
 
 The system owns the closed loop:
 
