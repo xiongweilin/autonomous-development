@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from autonomous_development.application.cycles import CycleService
 from autonomous_development.application.release_catalog import ReleaseCatalogService
 from autonomous_development.application.release_runtime import ReleaseRuntimeService
+from autonomous_development.application.source_promotion import SourcePromotionService
 from autonomous_development.domain.canary import CanaryGuardrails
 from autonomous_development.domain.enums import (
     CycleState,
@@ -28,6 +31,10 @@ class PostPromotionSoakService:
         releases: ReleaseCatalogService,
         decisions: SoakDecisionRepository,
         runtime: ReleaseRuntimeService,
+        source_promotion: SourcePromotionService,
+        *,
+        repository_root: Path,
+        default_branch: str,
     ) -> None:
         self._cycles = cycles
         self._traffic = traffic
@@ -35,6 +42,9 @@ class PostPromotionSoakService:
         self._releases = releases
         self._decisions = decisions
         self._runtime = runtime
+        self._source_promotion = source_promotion
+        self._repository_root = repository_root
+        self._default_branch = default_branch
 
     def start(self, cycle_id: str, *, operation_id: str) -> DevelopmentCycle:
         cycle = self._cycles.get(cycle_id)
@@ -161,6 +171,12 @@ class PostPromotionSoakService:
             cycle.target_id,
             cycle.baseline_release_id,
             operation_id=f"{effect_operation_id}:serving",
+        )
+        baseline = self._releases.get(cycle.baseline_release_id)
+        self._source_promotion.restore_baseline(
+            repository_root=self._repository_root,
+            default_branch=self._default_branch,
+            baseline_commit=baseline.source_commit,
         )
         return self._cycles.transition(
             cycle.id,
