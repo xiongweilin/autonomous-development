@@ -165,10 +165,7 @@ class DiagnosisService:
             feedback = self._feedback.get(ref.removeprefix(prefix))
             if feedback is None:
                 raise ValueError(f"feedback evidence reference cannot be resolved: {ref}")
-            if (
-                feedback.target_id != window.target_id
-                or feedback.release_id not in window.release_ids
-            ):
+            if feedback.target_id != window.target_id or not feedback.attributable:
                 raise ValueError(
                     "feedback evidence is not attributable to the evidence window"
                 )
