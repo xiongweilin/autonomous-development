@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from autonomous_development.application.cycles import CycleService
@@ -92,7 +92,7 @@ class FeedbackIterationController:
             target_id,
             baseline.id,
             deployment_id=baseline.deployment_id,
-            opened_at=baseline.promoted_at,
+            opened_at=datetime.min.replace(tzinfo=UTC),
             closed_at=closed_at,
         )
         trigger = next(
@@ -112,9 +112,13 @@ class FeedbackIterationController:
         if active is not None and active.id != ids.cycle_id:
             return None
 
-        opened_at = max(
-            baseline.promoted_at,
-            trigger.received_at - timedelta(seconds=self._evidence_lookback_seconds),
+        contextual_opened_at = trigger.received_at - timedelta(
+            seconds=self._evidence_lookback_seconds
+        )
+        opened_at = (
+            max(baseline.promoted_at, contextual_opened_at)
+            if trigger.release_id == baseline.id
+            else contextual_opened_at
         )
         window = self._windows.close(
             window_id=ids.window_id,
