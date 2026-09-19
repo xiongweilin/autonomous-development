@@ -15,6 +15,7 @@ from autonomous_development.domain.models import (
     UserFeedback,
 )
 from autonomous_development.ports.persistence import ServingReleaseReceipt
+from autonomous_development.ports.traffic import TrafficRouteSnapshot
 
 
 class MemoryReleaseRepository:
@@ -71,6 +72,14 @@ class MemoryAttributionRepository:
 
     def get(self, request_ref: str) -> RequestAttribution | None:
         return self.items.get(request_ref)
+
+
+class Routes:
+    def __init__(self, route: TrafficRouteSnapshot | None) -> None:
+        self.route = route
+
+    def read_current(self) -> TrafficRouteSnapshot | None:
+        return self.route
 
 
 class MemoryFeedbackRepository:
@@ -191,6 +200,34 @@ def test_candidate_feedback_uses_server_observed_request_attribution() -> None:
     assert feedback.release_id is None
     assert feedback.deployment_id == "deployment-2"
     assert feedback.experiment_id == "experiment-1"
+
+
+def test_feedback_without_request_ref_is_rejected_during_active_candidate_traffic() -> None:
+    releases = ReleaseCatalogService(MemoryReleaseRepository())
+    releases.register(release())
+    releases.set_serving("target-1", "release-1", operation_id="serve-1")
+    route = TrafficRouteSnapshot(
+        experiment_id="experiment-1",
+        stage_index=0,
+        control_base_url="http://127.0.0.1:4100",
+        candidate_base_url="http://127.0.0.1:4200",
+        candidate_weight_percent=10,
+        operation_id="canary:1",
+        generation=1,
+        evidence_ref="traffic:1",
+        target_id="target-1",
+        control_release_id="release-1",
+        candidate_deployment_id="deployment-2",
+    )
+    service = FeedbackService(
+        releases,
+        MemoryFeedbackRepository(),
+        MemoryAttributionRepository(),
+        Routes(route),
+    )
+
+    with pytest.raises(FeedbackAttributionError, match="request reference is required"):
+        service.ingest(submission(request_ref=None))
 
 
 def test_unknown_request_reference_fails_closed_when_attribution_is_enabled() -> None:
